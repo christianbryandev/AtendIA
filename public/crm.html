@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel CRM & Fidelidade - Gestão de Delivery</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            padding: 24px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #1e293b;
+        }
+        h1 {
+            font-size: 24px;
+            font-weight: 700;
+            color: #38bdf8;
+        }
+        .btn-action {
+            background-color: #0284c7;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-action:hover {
+            background-color: #0369a1;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+        .stat-card {
+            background-color: #1e293b;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #334155;
+        }
+        .stat-title {
+            font-size: 14px;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #f8fafc;
+        }
+        .table-container {
+            background-color: #1e293b;
+            border-radius: 12px;
+            border: 1px solid #334155;
+            overflow: hidden;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+        th {
+            background-color: #0f172a;
+            color: #94a3b8;
+            padding: 16px 20px;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        td {
+            padding: 16px 20px;
+            border-bottom: 1px solid #334155;
+            font-size: 14px;
+        }
+        tr:hover {
+            background-color: #334155;
+        }
+        .tag {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .tag-novo { background-color: #0369a1; color: #e0f2fe; }
+        .tag-vip { background-color: #854d0e; color: #fef08a; }
+        .tag-reativacao { background-color: #991b1b; color: #fecaca; }
+        .loyalty-badge {
+            color: #eab308;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <div>
+            <h1>📊 Painel CRM & Gestão de Clientes</h1>
+            <p style="color: #94a3b8; font-size: 14px; margin-top: 4px;">Base de contatos organizada e campanhas automáticas de fidelização</p>
+        </div>
+        <button class="btn-action" onclick="dispararReativacao()">🚀 Disparar Reativação (15 dias ausente)</button>
+    </header>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-title">TOTAL DE CLIENTES NO CRM</div>
+            <div class="stat-value" id="stat-total">--</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-title">LTV MÉDIO (VALOR POR CLIENTE)</div>
+            <div class="stat-value" style="color: #4ade80;" id="stat-ltv">R$ --</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-title">PONTOS DE FIDELIDADE DISTRIBUÍDOS</div>
+            <div class="stat-value" style="color: #eab308;" id="stat-pontos">-- pts</div>
+        </div>
+    </div>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Cliente / Telefone</th>
+                    <th>Endereço</th>
+                    <th>Pedidos</th>
+                    <th>LTV (Total Gasto)</th>
+                    <th>Pontos Fidelidade</th>
+                    <th>Tag CRM</th>
+                    <th>Última Compra</th>
+                </tr>
+            </thead>
+            <tbody id="crm-table-body">
+                <tr>
+                    <td colspan="7" style="text-align: center; color: #94a3b8;">Carregando base de clientes do CRM...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    async function carregarCRM() {
+        try {
+            const res = await fetch('/api/crm/clientes');
+            const data = await res.json();
+            const clientes = data.clientes || [];
+
+            document.getElementById('stat-total').innerText = clientes.length;
+
+            let totalLtv = 0;
+            let totalPontos = 0;
+
+            const tbody = document.getElementById('crm-table-body');
+            tbody.innerHTML = '';
+
+            if (clientes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #94a3b8;">Nenhum cliente cadastrado ainda. Mande uma mensagem no WhatsApp de testes!</td></tr>';
+                return;
+            }
+
+            clientes.forEach(c => {
+                totalLtv += Number(c.total_gasto || 0);
+                totalPontos += Number(c.pontos_fidelidade || 0);
+
+                const tr = document.createElement('tr');
+                const tagClass = c.tags?.includes('vip') ? 'tag-vip' : (c.tags?.includes('em_reativacao') ? 'tag-reativacao' : 'tag-novo');
+                const tagName = c.tags?.[0] || 'cliente_ativo';
+
+                tr.innerHTML = `
+                    <td>
+                        <b>${c.nome || 'Cliente WhatsApp'}</b><br>
+                        <span style="color: #94a3b8; font-size: 12px;">${c.telefone_whatsapp}</span>
+                    </td>
+                    <td>${c.logradouro || 'Endereço não cadastrado'}, ${c.numero || ''}</td>
+                    <td><b>${c.total_pedidos || 0}</b> pedidos</td>
+                    <td style="color: #4ade80; font-weight: 700;">R$ ${Number(c.total_gasto || 0).toFixed(2)}</td>
+                    <td class="loyalty-badge">⭐ ${c.pontos_fidelidade || 0} pts</td>
+                    <td><span class="tag ${tagClass}">${tagName}</span></td>
+                    <td style="color: #94a3b8;">${c.ultimo_pedido_at ? new Date(c.ultimo_pedido_at).toLocaleDateString('pt-BR') : 'Hoje'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            const ltvMedio = clientes.length > 0 ? (totalLtv / clientes.length) : 0;
+            document.getElementById('stat-ltv').innerText = `R$ ${ltvMedio.toFixed(2)}`;
+            document.getElementById('stat-pontos').innerText = `${totalPontos} pts`;
+        } catch (err) {
+            console.error('Erro ao carregar CRM:', err);
+        }
+    }
+
+    async function dispararReativacao() {
+        const confirmar = confirm("Deseja disparar a campanha automática de reativação com cupom de 10% OFF para clientes ausentes há mais de 15 dias?");
+        if (!confirmar) return;
+
+        try {
+            const res = await fetch('/api/crm/reativacao', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ restauranteId: 'default-restaurant-id', diasAusente: 15 })
+            });
+            const data = await res.json();
+            alert(data.mensagem || "Campanha disparada com sucesso!");
+            carregarCRM();
+        } catch (err) {
+            alert("Erro ao disparar campanha.");
+        }
+    }
+
+    carregarCRM();
+</script>
+</body>
+</html>

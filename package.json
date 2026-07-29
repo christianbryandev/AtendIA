@@ -1,0 +1,32 @@
+{
+  "name": "delivery-pdv-ia-backend",
+  "version": "1.0.0",
+  "description": "SaaS de Delivery, PDV e Automação de Vendas com IA no WhatsApp",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.48.0",
+    "@types/bcrypt": "^6.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "groq-sdk": "^0.13.0",
+    "jsonwebtoken": "^9.0.3",
+    "mercadopago": "^2.3.0",
+    "openai": "^4.83.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

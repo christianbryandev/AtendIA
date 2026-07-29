@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Plataforma de Gestão Delivery & IA</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+
+        .login-card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 16px;
+            padding: 40px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+
+        .brand-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .brand-logo-icon {
+            font-size: 40px;
+            color: #38bdf8;
+            margin-bottom: 12px;
+        }
+
+        .brand-title {
+            font-size: 22px;
+            font-weight: 800;
+            color: #f8fafc;
+        }
+
+        .brand-subtitle {
+            font-size: 13px;
+            color: #94a3b8;
+            margin-top: 4px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #cbd5e1;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+            background-color: #0f172a;
+            color: #ffffff;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            border-color: #0284c7;
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            background-color: #0284c7;
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-top: 10px;
+        }
+
+        .btn-login:hover {
+            background-color: #0369a1;
+        }
+
+        .alert-error {
+            background-color: #7f1d1d;
+            color: #fecaca;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 20px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="login-card">
+    <div class="brand-header">
+        <div class="brand-logo-icon"><i class="fa-solid fa-robot"></i></div>
+        <div class="brand-title">Painel de Gestão IA</div>
+        <div class="brand-subtitle">Acesse o painel do seu restaurante</div>
+    </div>
+
+    <div class="alert-error" id="login-error">
+        E-mail ou senha incorretos. Tente novamente.
+    </div>
+
+    <form id="login-form" onsubmit="realizarLogin(event)">
+        <div class="form-group">
+            <label for="email">E-mail de Acesso</label>
+            <input type="email" id="email" placeholder="seuemail@restaurante.com" required>
+        </div>
+
+        <div class="form-group">
+            <label for="password">Senha</label>
+            <input type="password" id="password" placeholder="••••••••" required>
+        </div>
+
+        <button type="submit" class="btn-login">Entrar no Painel</button>
+    </form>
+</div>
+
+<script>
+    async function realizarLogin(event) {
+        event.preventDefault();
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        const errorBox = document.getElementById('login-error');
+
+        errorBox.style.display = 'none';
+
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                // Guarda o token da sessão e o ID do restaurante
+                localStorage.setItem('restaurante_id', data.restauranteId);
+                localStorage.setItem('restaurante_nome', data.restauranteNome);
+                
+                // Redireciona para o Painel Principal
+                window.location.href = '/index.html';
+            } else {
+                errorBox.innerText = data.error || 'Credenciais inválidas.';
+                errorBox.style.display = 'block';
+            }
+        } catch (err) {
+            errorBox.innerText = 'Erro de conexão com o servidor.';
+            errorBox.style.display = 'block';
+        }
+    }
+</script>
+
+</body>
+</html>

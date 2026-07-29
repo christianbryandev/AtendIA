@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plataforma de Gestão - CRM & IA de Vendas</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+
+        :root {
+            --sidebar-width: 260px;
+            --primary-color: #00a884; /* Verde WhatsApp */
+            --primary-hover: #008f6f;
+            --bg-body: #efeae2; /* Fundo padrão do painel estilo chat */
+            --bg-card: #ffffff;
+            --border-color: #d1d7db;
+            --text-main: #111b21;
+            --text-muted: #667781;
+            --sidebar-bg: #f0f2f5;
+        }
+
+        body {
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* SIDEBAR PROPRIETÁRIA */
+        aside.sidebar {
+            width: var(--sidebar-width);
+            background-color: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 0;
+            flex-shrink: 0;
+        }
+
+        .brand-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 24px 20px;
+            font-weight: 600;
+            font-size: 18px;
+            color: var(--text-main);
+            background-color: #f0f2f5;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .brand-logo i {
+            font-size: 24px;
+            color: var(--primary-color);
+        }
+
+        .nav-section-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--primary-color);
+            padding: 24px 20px 8px 20px;
+        }
+
+        .nav-menu {
+            list-style: none;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            overflow-y: auto;
+            background-color: #ffffff;
+        }
+
+        .nav-item {
+            border-bottom: 1px solid #f0f2f5;
+        }
+
+        .nav-item a {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 14px 20px;
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 15px;
+            font-weight: 400;
+            transition: background-color 0.15s ease;
+        }
+
+        .nav-item a:hover {
+            background-color: #f5f6f6;
+        }
+
+        .nav-item.active a {
+            background-color: #f0f2f5;
+            font-weight: 500;
+        }
+
+        .nav-item.active a i {
+            color: var(--primary-color);
+        }
+
+        .nav-item a i {
+            font-size: 18px;
+            width: 24px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        /* MAIN CONTENT AREA */
+        main.main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #efeae2;
+        }
+
+        /* TOPBAR */
+        header.topbar {
+            height: 64px;
+            background-color: #f0f2f5;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            flex-shrink: 0;
+        }
+
+        .store-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .store-name {
+            font-weight: 500;
+            font-size: 16px;
+            color: var(--text-main);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .status-badge {
+            background-color: #dcf8c6;
+            color: #0b5e46;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: #ffffff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 24px;
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-hover);
+        }
+
+        /* BODY VIEWS */
+        .content-body {
+            flex-grow: 1;
+            padding: 32px 40px;
+            overflow-y: auto;
+            background-color: transparent;
+        }
+
+        .view-section {
+            display: none;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .view-section.active {
+            display: block;
+        }
+        
+        .section-title {
+            margin-bottom: 24px;
+            font-size: 24px;
+            font-weight: 400;
+            color: var(--text-main);
+        }
+
+        /* CARDS & GRID */
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        .card {
+            background-color: var(--bg-card);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(11,20,26,0.08);
+        }
+
+        .card-title {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .card-value {
+            font-size: 32px;
+            font-weight: 300;
+            color: var(--text-main);
+        }
+
+        /* TABLES */
+        .table-card {
+            background-color: var(--bg-card);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(11,20,26,0.08);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f0f2f5;
+            color: var(--text-muted);
+            padding: 16px 24px;
+            font-size: 13px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        td {
+            padding: 16px 24px;
+            border-bottom: 1px solid #f0f2f5;
+            font-size: 14px;
+            color: var(--text-main);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background-color: #f5f6f6;
+        }
+        
+        /* UTIL CLASSES */
+        .badge-success {
+            color: var(--primary-color);
+            font-weight: 500;
+        }
+        .badge-info {
+            color: #0284c7;
+            font-weight: 500;
+        }
+        .badge-vip {
+            background: #fff3c4;
+            color: #b47d00;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- SIDEBAR EXCLUSIVA BASEADA NO CONTRATO -->
+    <aside class="sidebar">
+        <div class="brand-logo" style="justify-content: center; padding: 32px 20px 24px 20px;">
+            <img src="logo.png" alt="AtendIA Logo" style="width: 160px; height: auto; mix-blend-mode: multiply; object-fit: contain;">
+        </div>
+
+        <ul class="nav-menu">
+            <div class="nav-section-title">Módulos do Contrato</div>
+            
+            <li class="nav-item active" id="nav-ia">
+                <a href="#" onclick="switchView('ia')">
+                    <i class="fa-solid fa-comments"></i> 1. Atendimento por IA
+                </a>
+            </li>
+            
+            <li class="nav-item" id="nav-crm">
+                <a href="#" onclick="switchView('crm')">
+                    <i class="fa-solid fa-address-book"></i> 2. CRM & Base Contatos
+                </a>
+            </li>
+
+            <li class="nav-item" id="nav-reativacao">
+                <a href="#" onclick="switchView('reativacao')">
+                    <i class="fa-solid fa-bullhorn"></i> 3. Reativação de Clientes
+                </a>
+            </li>
+
+            <li class="nav-item" id="nav-fidelidade">
+                <a href="#" onclick="switchView('fidelidade')">
+                    <i class="fa-solid fa-star"></i> 4. Programa de Fidelidade
+                </a>
+            </li>
+
+            <li class="nav-item" id="nav-automacoes">
+                <a href="#" onclick="switchView('automacoes')">
+                    <i class="fa-solid fa-bolt"></i> 5. Automações & Webhooks
+                </a>
+            </li>
+
+            <div class="nav-section-title">Operação Delivery</div>
+
+            <li class="nav-item" id="nav-pdv">
+                <a href="#" onclick="switchView('pdv')">
+                    <i class="fa-solid fa-cash-register"></i> Frente de Caixa (PDV)
+                </a>
+            </li>
+
+            <li class="nav-item" id="nav-cardapio">
+                <a href="#" onclick="switchView('cardapio')">
+                    <i class="fa-solid fa-book-open"></i> Cardápio Digital
+                </a>
+            </li>
+
+            <div class="nav-section-title">Configurações</div>
+
+            <li class="nav-item" id="nav-config">
+                <a href="#" onclick="switchView('config')">
+                    <i class="fa-solid fa-sliders"></i> Ajustes da IA & Tom
+                </a>
+            </li>
+        </ul>
+    </aside>
+
+    <!-- ÁREA PRINCIPAL DA APLICAÇÃO -->
+    <main class="main-content">
+        <!-- TOPBAR -->
+        <header class="topbar">
+            <div class="store-info">
+                <span class="store-name">Restaurante Piloto</span>
+                <div class="status-badge">
+                    <i class="fa-solid fa-circle" style="font-size: 8px;"></i> IA Ativa 24h
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <button class="btn-primary" onclick="switchView('reativacao')">
+                    <i class="fa-solid fa-paper-plane"></i> Nova Campanha
+                </button>
+            </div>
+        </header>
+
+        <!-- CONTEÚDO DINÂMICO -->
+        <div class="content-body">
+            
+            <!-- VIEW 1: ATENDIMENTO POR IA -->
+            <div class="view-section active" id="view-ia">
+                <h2 style="margin-bottom: 16px; font-size: 20px;">🤖 Atendimento & Vendas por IA (WhatsApp)</h2>
+                <div class="grid-3">
+                    <div class="card">
+                        <div class="card-title">ATENDIMENTOS IA HOJE</div>
+                        <div class="card-value">48</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">TAXA DE CONVERSÃO DE PEDIDOS</div>
+                        <div class="card-value" style="color: #34d399;">92.4%</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">TRANSCRIÇÕES DE ÁUDIO (WHISPER)</div>
+                        <div class="card-value" style="color: #38bdf8;">112 min</div>
+                    </div>
+                </div>
+
+                <div class="table-card">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Cliente</th>
+                                <th>Mensagem / Áudio</th>
+                                <th>Resposta da IA</th>
+                                <th>Status</th>
+                                <th>Horário</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><b>João Silva</b><br><span style="color: var(--text-muted);">+55 11 99999-1111</span></td>
+                                <td>🎤 <i>[Áudio de 24s transcrevendo...]</i></td>
+                                <td>🔊 <i>"Anotado João! 1 X-Bacon + Coca-Cola. Total R$ 43,00..."</i></td>
+                                <td><span style="color: #34d399; font-weight: 700;">Pedido Criado</span></td>
+                                <td>Há 2 min</td>
+                            </tr>
+                            <tr>
+                                <td><b>Maria Souza</b><br><span style="color: var(--text-muted);">+55 11 98888-2222</span></td>
+                                <td>"Qual o valor da entrega para o centro?"</td>
+                                <td>"A taxa para o centro é R$ 5,00. Deseja ver o cardápio?"</td>
+                                <td><span style="color: #38bdf8;">Em Atendimento</span></td>
+                                <td>Há 8 min</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- VIEW 2: CRM & BASE DE CONTATOS -->
+            <div class="view-section" id="view-crm">
+                <h2 style="margin-bottom: 16px; font-size: 20px;">👥 CRM & Organização da Base de Contatos</h2>
+                <div class="grid-3">
+                    <div class="card">
+                        <div class="card-title">BASE TOTAL DE CONTATOS</div>
+                        <div class="card-value">342</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">LTV MÉDIO POR CLIENTE</div>
+                        <div class="card-value" style="color: #34d399;">R$ 114,80</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">CLIENTES RECORRENTES (VIP)</div>
+                        <div class="card-value" style="color: #facc15;">86</div>
+                    </div>
+                </div>
+
+                <div class="table-card">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Cliente / WhatsApp</th>
+                                <th>Total Gasto (LTV)</th>
+                                <th>Pedidos Feitos</th>
+                                <th>Tag CRM</th>
+                                <th>Última Compra</th>
+                            </tr>
+                        </thead>
+                        <tbody id="crm-rows">
+                            <tr>
+                                <td><b>Carlos Mendes</b><br><span style="color: var(--text-muted);">+55 11 97777-3333</span></td>
+                                <td style="color: #34d399; font-weight: 700;">R$ 480,00</td>
+                                <td><b>12</b> pedidos</td>
+                                <td><span style="background: #854d0e; color: #fef08a; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: 700;">VIP</span></td>
+                                <td>Ontem</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- VIEW 3: CAMPANHAS DE REATIVAÇÃO -->
+            <div class="view-section" id="view-reativacao">
+                <h2 style="margin-bottom: 16px; font-size: 20px;">📣 Campanhas de Reativação de Clientes Ausentes</h2>
+                <div class="card" style="margin-bottom: 24px;">
+                    <h3 style="font-size: 15px; margin-bottom: 12px;">Disparar Campanha de Resgate no WhatsApp</h3>
+                    <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">O sistema filtra os clientes do CRM que não compram há mais de 15 dias e envia uma mensagem personalizada com cupom de desconto.</p>
+                    <button class="btn-primary" onclick="alert('Campanha de reativação iniciada! Os cupons VOLTEI10 estão sendo disparados.')">
+                        <i class="fa-solid fa-paper-plane"></i> Disparar Cupom VOLTEI10 para Clientes Inativos (15+ dias)
+                    </button>
+                </div>
+            </div>
+
+            <!-- VIEW 4: PROGRAMA DE FIDELIDADE -->
+            <div class="view-section" id="view-fidelidade">
+                <h2 style="margin-bottom: 16px; font-size: 20px;">⭐ Estratégias & Pontos de Fidelidade</h2>
+                <div class="card">
+                    <h3 style="font-size: 15px; margin-bottom: 12px;">Regra de Pontuação Atual</h3>
+                    <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">• 1 Ponto de Fidelidade acumulado a cada R$ 10,00 gastos no delivery.</p>
+                    <p style="color: var(--text-muted); font-size: 13px;">• Com 50 pontos, o cliente ganha 1 Sobremesa ou Guaraná 2L de brinde no WhatsApp.</p>
+                </div>
+            </div>
+
+            <!-- VIEW 5: CONFIGURAÇÕES DA IA -->
+            <div class="view-section" id="view-config">
+                <h2 style="margin-bottom: 16px; font-size: 20px;">⚙️ Ajustes da IA & Tom de Voz</h2>
+                <div class="card">
+                    <h3 style="font-size: 15px; margin-bottom: 12px;">Personalidade do Atendente Virtual</h3>
+                    <div style="margin-bottom: 16px;">
+                        <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 6px;">TOM DE VOZ DA IA:</label>
+                        <input type="text" value="Amigável, descontraído e focado em vendas rápidas" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: #0f172a; color: white;">
+                    </div>
+                    <button class="btn-primary">Salvar Configurações</button>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        function switchView(viewName) {
+            // Remove active classes
+            document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+
+            // Add active class to target view & nav
+            const targetView = document.getElementById('view-' + viewName);
+            const targetNav = document.getElementById('nav-' + viewName);
+
+            if (targetView) targetView.classList.add('active');
+            if (targetNav) targetNav.classList.add('active');
+        }
+    </script>
+</body>
+</html>
