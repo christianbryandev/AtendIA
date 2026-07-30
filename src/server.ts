@@ -232,10 +232,11 @@ app.post('/api/auth/login', async (req, res) => {
 
   const userJwtToken = jwt.sign(
     {
-      sub: usuario.id,
+      sub: usuario.restaurante_id,
       role: 'authenticated',
       aud: 'authenticated',
       user_metadata: {
+        usuario_id: usuario.id,
         restaurante_id: usuario.restaurante_id,
         nome: usuario.nome,
       },
