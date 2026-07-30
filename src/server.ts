@@ -485,7 +485,7 @@ app.put('/api/crm/estagio', async (req, res) => {
     }
 
     if (Object.keys(updateData).length > 0) {
-      await supabaseAdmin.from('clientes_crm').update(updateData).eq('id', clienteId);
+      await supabaseAdmin.from('clientes_crm').update(updateData).eq('id', clienteId).eq('restaurante_id', restauranteId);
       
       if (mudouEstagio) {
         await supabaseAdmin.from('historico_crm').insert({
@@ -611,7 +611,8 @@ app.put('/api/pdv/pedidos/:id/status', async (req, res) => {
     await supabaseAdmin
       .from('pedidos')
       .update({ status })
-      .eq('id', pedidoId);
+      .eq('id', pedidoId)
+      .eq('restaurante_id', restauranteId);
 
     // Gatilhos do Kanban CRM (se houver cliente vinculado)
     if (pedido.cliente_id) {
@@ -620,7 +621,8 @@ app.put('/api/pdv/pedidos/:id/status', async (req, res) => {
         await supabaseAdmin.from('clientes_crm').update({
           estagio_pipeline: 'pedido_em_andamento',
           bloqueio_cron_manual: false
-        }).eq('id', pedido.cliente_id);
+        }).eq('id', pedido.cliente_id)
+        .eq('restaurante_id', restauranteId);
 
         await supabaseAdmin.from('historico_crm').insert({
           cliente_id: pedido.cliente_id,
