@@ -1,4 +1,13 @@
 import express from 'express';
+import crypto from 'crypto';
+
+declare global {
+  namespace Express {
+    interface Request {
+      rawBody?: Buffer;
+    }
+  }
+}
 import cors from 'cors';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
@@ -14,7 +23,11 @@ import { decrypt } from './utils/crypto.js';
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.static('public'));
 
 // ------------------------------------------------------------------
@@ -37,6 +50,24 @@ app.get('/webhook/whatsapp', (req, res) => {
 // 2. RECEBIMENTO ASSÍNCRONO DE MENSAGENS (USO RESTRITO DA SERVICE_ROLE)
 // ------------------------------------------------------------------
 app.post('/webhook/whatsapp', (req, res) => {
+  const signature = req.headers['x-hub-signature-256'];
+  const rawBody = req.rawBody;
+
+  if (!signature || typeof signature !== 'string' || !signature.startsWith('sha256=') || !rawBody) {
+    console.error('[Webhook] Falha na validação: Assinatura ou rawBody ausente/inválido.');
+    return res.status(401).send('Unauthorized');
+  }
+
+  const expectedSignature = `sha256=${crypto.createHmac('sha256', env.META_APP_SECRET).update(rawBody).digest('hex')}`;
+  
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+
+  if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    console.error('[Webhook] Falha na validação: Assinatura não confere.');
+    return res.status(401).send('Unauthorized');
+  }
+
   res.status(200).send('EVENT_RECEIVED');
 
   setImmediate(async () => {

@@ -19,6 +19,7 @@ const envSchema = z.object({
   META_WHATSAPP_TOKEN: z.string().optional(),
   META_PHONE_NUMBER_ID: z.string().optional(),
   META_VERIFY_TOKEN: z.string().min(20, 'O META_VERIFY_TOKEN deve ter no mínimo 20 caracteres.'),
+  META_APP_SECRET: z.string().min(20, 'O META_APP_SECRET deve ter no mínimo 20 caracteres.'),
   MERCADO_PAGO_ACCESS_TOKEN: z.string().optional(),
   IFOOD_CLIENT_ID: z.string().optional(),
   IFOOD_CLIENT_SECRET: z.string().optional(),
