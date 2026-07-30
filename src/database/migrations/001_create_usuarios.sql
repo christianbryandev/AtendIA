@@ -14,7 +14,7 @@ CREATE TABLE usuarios (
 CREATE TRIGGER update_usuarios_updated_at
   BEFORE UPDATE ON usuarios
   FOR EACH ROW
-  EXECUTE FUNCTION trigger_set_timestamp();
+  EXECUTE FUNCTION update_updated_at_column();
 
 -- RLS para tabela usuarios
 ALTER TABLE usuarios ENABLE ROW LEVEL SECURITY;
