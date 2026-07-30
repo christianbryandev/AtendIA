@@ -9,7 +9,8 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
-  SUPABASE_JWT_SECRET: z.string().optional(),
+  SUPABASE_JWT_SECRET: z.string().min(32, 'O segredo JWT deve ter no mínimo 32 caracteres.'),
+  CRON_SECRET: z.string().min(20, 'O segredo CRON deve ter no mínimo 20 caracteres.'),
   ENCRYPTION_KEY: z.string()
     .length(64, 'ENCRYPTION_KEY deve ter exatamente 64 caracteres.')
     .regex(/^[0-9a-fA-F]+$/, 'ENCRYPTION_KEY deve ser uma string hexadecimal válida.'),
@@ -24,3 +25,11 @@ const envSchema = z.object({
 });
 
 export const env = envSchema.parse(process.env);
+
+export function getJwtSecret(): string {
+  return env.SUPABASE_JWT_SECRET;
+}
+
+export function getCronSecret(): string {
+  return env.CRON_SECRET;
+}

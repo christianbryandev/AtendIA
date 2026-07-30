@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { env } from './config/env.js';
+import { env, getJwtSecret, getCronSecret } from './config/env.js';
 import { supabase, supabaseAdmin, getTenantSupabaseClient } from './config/supabase.js';
 import { transcribeAudioWithGroq } from './services/ai/groq-stt.js';
 import { processCustomerMessageWithAI } from './services/ai/openai-agent.js';
@@ -228,7 +228,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   // 3. Emite o JWT usando a estrutura exata que o Postgres RLS espera
-  const jwtSecret = env.SUPABASE_JWT_SECRET || 'super-secret-supabase-jwt-key-default';
+  const jwtSecret = getJwtSecret();
 
   const userJwtToken = jwt.sign(
     {
@@ -263,7 +263,7 @@ app.post('/api/auth/refresh', async (req, res) => {
   }
 
   const token = authHeader.split(' ')[1];
-  const jwtSecret = env.SUPABASE_JWT_SECRET || 'super-secret-supabase-jwt-key-default';
+  const jwtSecret = getJwtSecret();
 
   try {
     // 1. Verifica o token ignorando a expiração atual (para poder renovar tokens recém-expirados)
@@ -320,7 +320,7 @@ app.get('/api/dashboard/metricas', async (req, res) => {
   const token = authHeader.split(' ')[1];
 
   try {
-    const jwtSecret = env.SUPABASE_JWT_SECRET || 'super-secret-supabase-jwt-key-default';
+    const jwtSecret = getJwtSecret();
     const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
     const restauranteId = decoded.sub;
 
@@ -426,7 +426,7 @@ app.post('/api/crm/reativacao', async (req, res) => {
   const token = authHeader.split(' ')[1];
   
   try {
-    const jwtSecret = env.SUPABASE_JWT_SECRET || 'super-secret-supabase-jwt-key-default';
+    const jwtSecret = getJwtSecret();
     const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
     
     // O ID seguro do restaurante vem do Token validado, não do body da requisição
@@ -453,7 +453,7 @@ app.put('/api/crm/estagio', async (req, res) => {
   const token = authHeader.split(' ')[1];
   
   try {
-    const jwtSecret = env.SUPABASE_JWT_SECRET || 'super-secret-supabase-jwt-key-default';
+    const jwtSecret = getJwtSecret();
     const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
     const restauranteId = decoded.sub;
 
@@ -509,7 +509,7 @@ app.put('/api/crm/estagio', async (req, res) => {
 // ------------------------------------------------------------------
 app.post('/api/cron/verificar-inatividade', async (req, res) => {
   const secret = req.headers['x-cron-secret'];
-  const expectedSecret = env.CRON_SECRET || 'meu_segredo_cron_123';
+  const expectedSecret = getCronSecret();
   
   if (secret !== expectedSecret) {
     return res.status(401).json({ error: 'Acesso não autorizado ao cron' });
@@ -538,7 +538,7 @@ app.post('/api/ifood/sync', async (req, res) => {
   const token = authHeader.split(' ')[1];
   
   try {
-    const jwtSecret = env.SUPABASE_JWT_SECRET || 'super-secret-supabase-jwt-key-default';
+    const jwtSecret = getJwtSecret();
     const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
     
     const restauranteIdSeguro = decoded.sub;
@@ -584,7 +584,7 @@ app.put('/api/pdv/pedidos/:id/status', async (req, res) => {
   const token = authHeader.split(' ')[1];
   
   try {
-    const jwtSecret = env.SUPABASE_JWT_SECRET || 'super-secret-supabase-jwt-key-default';
+    const jwtSecret = getJwtSecret();
     const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
     const restauranteId = decoded.sub;
 
