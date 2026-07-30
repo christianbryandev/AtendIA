@@ -24,8 +24,10 @@ export async function upsertCustomerInCRM(params: UpsertCustomerParams) {
     .eq('telefone_whatsapp', params.telefoneWhatsApp)
     .single();
 
+  const now = new Date().toISOString();
+
   if (existingCustomer) {
-    // Atualiza cadastro mantendo histórico acumulado
+    // Atualiza cadastro mantendo histórico acumulado e flag de ultima mensagem
     const { data: updated } = await supabase
       .from('clientes_crm')
       .update({
@@ -35,7 +37,8 @@ export async function upsertCustomerInCRM(params: UpsertCustomerParams) {
         bairro: params.bairro || existingCustomer.bairro,
         cidade: params.cidade || existingCustomer.cidade,
         complemento: params.complemento || existingCustomer.complemento,
-        updated_at: new Date().toISOString(),
+        updated_at: now,
+        ultima_mensagem_em: now,
       })
       .eq('id', existingCustomer.id)
       .select()
@@ -43,7 +46,7 @@ export async function upsertCustomerInCRM(params: UpsertCustomerParams) {
 
     return updated;
   } else {
-    // Cria novo contato na base com Tag 'cliente_novo'
+    // Cria novo contato na base com estagio 'novo_contato'
     const { data: created } = await supabase
       .from('clientes_crm')
       .insert({
@@ -55,11 +58,20 @@ export async function upsertCustomerInCRM(params: UpsertCustomerParams) {
         bairro: params.bairro,
         cidade: params.cidade,
         complemento: params.complemento,
-        tags: ['cliente_novo'],
+        estagio_pipeline: 'novo_contato',
+        ultima_mensagem_em: now,
         opt_in_marketing: true,
       })
       .select()
       .single();
+
+    if (created) {
+      await supabase.from('historico_crm').insert({
+        cliente_id: created.id,
+        estagio_novo: 'novo_contato',
+        motivo: 'evento_pedido'
+      });
+    }
 
     return created;
   }

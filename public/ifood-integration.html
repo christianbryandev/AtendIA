@@ -72,8 +72,11 @@
             const btn = document.getElementById('btnSync');
             const statusBox = document.getElementById('statusMessage');
             
-            // Simulação de Token (No seu app real, você pega do localStorage)
-            const tokenMock = "SEU_JWT_TOKEN_AQUI"; 
+            const token = localStorage.getItem('auth_token');
+            if (!token) {
+                window.location.href = '/login.html';
+                return;
+            }
 
             // Mostra loading
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sincronizando...';
@@ -82,16 +85,11 @@
             statusBox.classList.add('hidden');
 
             try {
-                // Aqui você deve fazer uma requisição prévia ou garantir que o Merchant ID 
-                // digitado seja salvo no Supabase (coluna ifood_merchant_id) *antes* ou *junto* da requisição de sync.
-                // Para simplificar no MVP, a sua rota /api/ifood/sync assume que o Merchant ID já está no banco. 
-                // Você pode adicionar uma rota PUT /api/restaurantes/ifood para salvar o ID antes.
-
                 const response = await fetch('/api/ifood/sync', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${tokenMock}`
+                        'Authorization': `Bearer ${token}`
                     }
                 });
 

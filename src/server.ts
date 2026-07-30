@@ -9,6 +9,7 @@ import { processCustomerMessageWithAI } from './services/ai/openai-agent.js';
 import { sendWhatsAppTextMessage, downloadWhatsAppMedia } from './services/whatsapp/meta-cloud-api.js';
 import { upsertCustomerInCRM, runReactivationCampaign } from './services/crm/reactivation.js';
 import { importarCardapioiFood } from './services/ifood/ifood-api.js';
+import { decrypt } from './utils/crypto.js';
 
 const app = express();
 
@@ -50,11 +51,25 @@ app.post('/webhook/whatsapp', (req, res) => {
         if (message) {
           const fromPhone = message.from;
           const messageType = message.type;
+          const messageId = message.id; // Captura ID para idempotência
 
           const fromPhoneNumberId = value?.metadata?.phone_number_id;
           if (!fromPhoneNumberId) {
             console.log('[Webhook] Mensagem ignorada: phone_number_id ausente.');
             return;
+          }
+
+          // 1. CHECAGEM DE IDEMPOTÊNCIA
+          if (messageId) {
+            const { error: erroIdempotencia } = await supabaseAdmin
+              .from('webhook_eventos_processados')
+              .insert([{ message_id: messageId }]);
+
+            // Se der erro de unique constraint, significa que já processamos essa mensagem
+            if (erroIdempotencia) {
+              console.log(`[Webhook] Mensagem ${messageId} já processada. Ignorando duplicata.`);
+              return;
+            }
           }
 
           // Uso do cliente Admin para buscar o tenant correto com base no número destino
@@ -70,38 +85,107 @@ app.post('/webhook/whatsapp', (req, res) => {
           }
 
           const restauranteId = restaurante.id;
-          const metaToken = restaurante.meta_access_token || env.META_WHATSAPP_TOKEN;
-
-          let textoEntrada = '';
-
-          if (messageType === 'audio') {
-            console.log(`[Áudio Assíncrono] De: ${fromPhone} | Baixando da Meta e Transcrevendo...`);
-            const audioId = message.audio?.id;
-            if (audioId) {
-              const audioBuffer = await downloadWhatsAppMedia(audioId, metaToken);
-              textoEntrada = await transcribeAudioWithGroq(audioBuffer, 'audio.ogg');
+          let metaToken = env.META_WHATSAPP_TOKEN;
+          
+          if (restaurante.meta_access_token) {
+            try {
+              metaToken = decrypt(restaurante.meta_access_token);
+            } catch (err) {
+              console.error(`[Webhook] ERRO: Falha ao decifrar token do restaurante ${restauranteId}.`);
+              return;
             }
-          } else if (messageType === 'text') {
-            textoEntrada = message.text.body;
           }
 
-          if (textoEntrada) {
-            console.log(`[Mensagem Cliente Assíncrona] De: ${fromPhone} | Texto: "${textoEntrada}"`);
-
-            await upsertCustomerInCRM({
-              restauranteId,
-              telefoneWhatsApp: fromPhone,
+          // 2. CÁLCULO E CONSUMO DE CRÉDITOS (ANTES DE PROCESSAR)
+          const custoCreditos = messageType === 'audio' ? 3 : 1;
+          const { data: creditosAprovados, error: erroCreditos } = await supabaseAdmin
+            .rpc('consumir_creditos_ia', {
+              p_restaurante_id: restauranteId,
+              p_qtd: custoCreditos,
+              p_tipo: messageType
             });
 
-            const { respostaTexto } = await processCustomerMessageWithAI({
-              restauranteId,
-              telefoneCliente: fromPhone,
-              mensagemTexto: textoEntrada,
+          if (erroCreditos || !creditosAprovados) {
+            console.log(`[Webhook] Restaurante ${restauranteId} sem créditos suficientes. Abortando IA.`);
+            await sendWhatsAppTextMessage({
+              toPhoneNumber: fromPhone,
+              text: 'Nosso atendimento automático está temporariamente indisponível. Entre em contato diretamente com a loja.',
+              phoneNumberId: fromPhoneNumberId,
+              token: metaToken
             });
+            return;
+          }
+
+          // 3. BLOCO TRY-CATCH ISOLADO PARA REEMBOLSO EM CASO DE FALHA DA IA
+          let creditoJaEstornado = false;
+          try {
+            let textoEntrada = '';
+
+            if (messageType === 'audio') {
+              console.log(`[Áudio Assíncrono] De: ${fromPhone} | Baixando da Meta e Transcrevendo...`);
+              const audioId = message.audio?.id;
+              if (audioId) {
+                const audioBuffer = await downloadWhatsAppMedia(audioId, metaToken);
+                textoEntrada = await transcribeAudioWithGroq(audioBuffer, 'audio.ogg');
+              }
+            } else if (messageType === 'text') {
+              textoEntrada = message.text.body;
+            }
+
+            if (textoEntrada) {
+              console.log(`[Mensagem Cliente Assíncrona] De: ${fromPhone} | Texto: "${textoEntrada}"`);
+
+              await upsertCustomerInCRM({
+                restauranteId,
+                telefoneWhatsApp: fromPhone,
+              });
+
+              const { respostaTexto } = await processCustomerMessageWithAI({
+                restauranteId,
+                telefoneCliente: fromPhone,
+                mensagemTexto: textoEntrada,
+              });
+
+              await sendWhatsAppTextMessage({
+                toPhoneNumber: fromPhone,
+                text: respostaTexto,
+                phoneNumberId: fromPhoneNumberId,
+                token: metaToken
+              });
+            } else {
+              console.log(`[Webhook] Mensagem ignorada (tipo não suportado ou vazia). Reembolsando.`);
+              
+              await supabaseAdmin.rpc('reembolsar_creditos_ia', {
+                p_restaurante_id: restauranteId,
+                p_qtd: custoCreditos,
+                p_tipo: messageType,
+                p_motivo: 'Tipo de mensagem não suportado ou mídia vazia'
+              });
+              creditoJaEstornado = true;
+
+              await sendWhatsAppTextMessage({
+                toPhoneNumber: fromPhone,
+                text: 'Desculpe, ainda não consigo entender esse tipo de mensagem (figurinha, localização, etc.). Por favor, envie um texto ou áudio!',
+                phoneNumberId: fromPhoneNumberId,
+                token: metaToken
+              });
+            }
+          } catch (iaError: any) {
+            console.error(`[Webhook] Falha no processamento da IA para a mensagem ${messageId}:`, iaError);
+            
+            if (!creditoJaEstornado) {
+              // Reembolso Automático
+              await supabaseAdmin.rpc('reembolsar_creditos_ia', {
+                p_restaurante_id: restauranteId,
+                p_qtd: custoCreditos,
+                p_tipo: messageType,
+                p_motivo: `Falha na API: ${iaError.message}`
+              });
+            }
 
             await sendWhatsAppTextMessage({
               toPhoneNumber: fromPhone,
-              text: respostaTexto,
+              text: 'Desculpe, ocorreu um erro interno ao processar sua mensagem. Por favor, tente novamente em instantes ou contate a loja.',
               phoneNumberId: fromPhoneNumberId,
               token: metaToken
             });
@@ -124,48 +208,46 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ success: false, error: 'E-mail e senha são obrigatórios.' });
   }
 
-  const { data: restaurante, error } = await supabaseAdmin
-    .from('restaurantes')
-    .select('id, nome, email_acesso, senha_acesso')
-    .eq('email_acesso', email)
+  // 1. Busca o usuário pelo e-mail
+  const { data: usuario, error: errorUsuario } = await supabaseAdmin
+    .from('usuarios')
+    .select('id, restaurante_id, senha_hash, nome')
+    .eq('email', email)
     .single();
 
-  if (error || !restaurante) {
-    return res.status(401).json({ success: false, error: 'Credenciais inválidas.' });
+  if (errorUsuario || !usuario) {
+    // Retorna erro genérico para não vazar se o e-mail existe
+    return res.status(401).json({ success: false, error: 'E-mail ou senha inválidos.' });
   }
 
-  const senhaValida = restaurante.senha_acesso.startsWith('$2b$') 
-    ? await bcrypt.compare(password, restaurante.senha_acesso)
-    : restaurante.senha_acesso === password;
+  // 2. Valida a senha obrigatoriamente com bcrypt
+  const senhaValida = await bcrypt.compare(password, usuario.senha_hash);
 
   if (!senhaValida) {
-    return res.status(401).json({ success: false, error: 'Credenciais inválidas.' });
+    return res.status(401).json({ success: false, error: 'E-mail ou senha inválidos.' });
   }
 
-  // ASSINATURA DO JWT USANDO O SUPABASE_JWT_SECRET DO PROJETO!
-  // O PostgreSQL valida esta assinatura e extrai a claim user_metadata.restaurante_id nas políticas de RLS!
+  // 3. Emite o JWT usando a estrutura exata que o Postgres RLS espera
   const jwtSecret = env.SUPABASE_JWT_SECRET || 'super-secret-supabase-jwt-key-default';
 
   const userJwtToken = jwt.sign(
     {
-      sub: restaurante.id,
+      sub: usuario.id,
       role: 'authenticated',
       aud: 'authenticated',
       user_metadata: {
-        restaurante_id: restaurante.id,
-        nome: restaurante.nome,
+        restaurante_id: usuario.restaurante_id,
+        nome: usuario.nome,
       },
     },
     jwtSecret,
-    { expiresIn: '12h' } // Expiração de 12 horas (Cobre um turno inteiro de restaurante)
+    { expiresIn: '12h' }
   );
 
   return res.json({
     success: true,
     token: userJwtToken,
-    expiresIn: 43200, // 12 horas (43200s)
-    restauranteId: restaurante.id,
-    restauranteNome: restaurante.nome,
+    expiresIn: 43200, // 12 horas
     message: 'Login realizado com sucesso!',
   });
 });
@@ -227,7 +309,93 @@ app.post('/api/auth/refresh', async (req, res) => {
 });
 
 // ------------------------------------------------------------------
-// 4. ROTAS DE CRM, CAMPANHAS E FIDELIZAÇÃO
+// 4. ROTAS DE DASHBOARD E MÉTRICAS
+// ------------------------------------------------------------------
+app.get('/api/dashboard/metricas', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Token não fornecido' });
+  }
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const jwtSecret = env.SUPABASE_JWT_SECRET || 'super-secret-supabase-jwt-key-default';
+    const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
+    const restauranteId = decoded.sub;
+
+    if (!restauranteId) {
+      return res.status(400).json({ error: 'ID do restaurante ausente no token' });
+    }
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const isoDate = thirtyDaysAgo.toISOString();
+
+    // 1. Faturamento & Pedidos
+    const { data: pedidosData, error: errPedidos } = await supabaseAdmin
+      .from('pedidos')
+      .select('valor_total, status')
+      .eq('restaurante_id', restauranteId)
+      .gte('created_at', isoDate);
+
+    if (errPedidos) throw errPedidos;
+
+    let faturamento = 0;
+    let pedidosConcluidos = 0;
+
+    for (const pedido of pedidosData) {
+      if (pedido.status === 'CONCLUIDO') {
+        faturamento += Number(pedido.valor_total);
+        pedidosConcluidos += 1;
+      }
+    }
+
+    const ticketMedio = pedidosConcluidos > 0 ? faturamento / pedidosConcluidos : 0;
+
+    // 2. Novos Clientes (Cadastrados nos últimos 30 dias)
+    const { count: novosClientes, error: errClientes } = await supabaseAdmin
+      .from('clientes_crm')
+      .select('*', { count: 'exact', head: true })
+      .eq('restaurante_id', restauranteId)
+      .gte('created_at', isoDate);
+
+    if (errClientes) throw errClientes;
+
+    // 3. Consumo e Interações de IA
+    const { data: iaData, error: errIa } = await supabaseAdmin
+      .from('creditos_ia')
+      .select('creditos_consumidos')
+      .eq('restaurante_id', restauranteId)
+      .gte('created_at', isoDate);
+
+    if (errIa) throw errIa;
+
+    let creditosConsumidos = 0;
+    let interacoesIa = 0;
+
+    for (const row of iaData) {
+      creditosConsumidos += Number(row.creditos_consumidos);
+      if (row.creditos_consumidos > 0) {
+        interacoesIa += 1;
+      }
+    }
+
+    return res.json({
+      faturamento,
+      pedidosConcluidos,
+      ticketMedio,
+      novosClientes: novosClientes || 0,
+      creditosConsumidos,
+      interacoesIa
+    });
+  } catch (err: any) {
+    console.error('[Dashboard API Error]:', err);
+    return res.status(500).json({ error: 'Erro ao carregar métricas.' });
+  }
+});
+
+// ------------------------------------------------------------------
+// 5. ROTAS DE CRM, CAMPANHAS E FIDELIZAÇÃO
 // ------------------------------------------------------------------
 
 // Lista contatos do CRM
@@ -272,6 +440,89 @@ app.post('/api/crm/reativacao', async (req, res) => {
     return res.json(resultado);
   } catch (err) {
     return res.status(401).json({ error: 'Token inválido ou expirado' });
+  }
+});
+
+// Atualização Manual de Estágio do Kanban (Override Manual)
+app.put('/api/crm/estagio', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Token não fornecido' });
+  }
+  const token = authHeader.split(' ')[1];
+  
+  try {
+    const jwtSecret = env.SUPABASE_JWT_SECRET || 'super-secret-supabase-jwt-key-default';
+    const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
+    const restauranteId = decoded.sub;
+
+    const { clienteId, novoEstagio, problemaAtivo } = req.body;
+
+    if (!clienteId) return res.status(400).json({ error: 'clienteId obrigatório' });
+
+    // Busca estágio atual para o log
+    const { data: cliente, error: fetchErr } = await supabaseAdmin
+      .from('clientes_crm')
+      .select('estagio_pipeline')
+      .eq('id', clienteId)
+      .eq('restaurante_id', restauranteId)
+      .single();
+
+    if (fetchErr || !cliente) throw new Error('Cliente não encontrado');
+
+    const estagioAnterior = cliente.estagio_pipeline;
+    const updateData: any = {};
+    let mudouEstagio = false;
+
+    if (novoEstagio && novoEstagio !== estagioAnterior) {
+      updateData.estagio_pipeline = novoEstagio;
+      updateData.bloqueio_cron_manual = true; // Trava o cron de sobrescrever a decisão manual
+      mudouEstagio = true;
+    }
+    if (problemaAtivo !== undefined) {
+      updateData.problema_ativo = problemaAtivo;
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      await supabaseAdmin.from('clientes_crm').update(updateData).eq('id', clienteId);
+      
+      if (mudouEstagio) {
+        await supabaseAdmin.from('historico_crm').insert({
+          cliente_id: clienteId,
+          estagio_anterior: estagioAnterior,
+          estagio_novo: novoEstagio,
+          motivo: 'manual_lojista'
+        });
+      }
+    }
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error(err);
+    return res.status(500).json({ error: 'Erro ao atualizar estágio' });
+  }
+});
+
+// ------------------------------------------------------------------
+// 5. CRON JOBS (Chamados externamente pelo Render / AWS)
+// ------------------------------------------------------------------
+app.post('/api/cron/verificar-inatividade', async (req, res) => {
+  const secret = req.headers['x-cron-secret'];
+  const expectedSecret = env.CRON_SECRET || 'meu_segredo_cron_123';
+  
+  if (secret !== expectedSecret) {
+    return res.status(401).json({ error: 'Acesso não autorizado ao cron' });
+  }
+
+  try {
+    // Gatilho 4: Chama a RPC que processa o rebaixamento massivo
+    const { data: movidos, error } = await supabaseAdmin.rpc('processar_cron_inatividade');
+    if (error) throw error;
+
+    return res.json({ success: true, clientes_movidos_para_risco: movidos });
+  } catch (err: any) {
+    console.error('[CRON Error]:', err);
+    return res.status(500).json({ error: 'Erro ao processar cron' });
   }
 });
 
@@ -321,6 +572,81 @@ app.get('/api/pdv/pedidos', async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
   return res.json(pedidos);
+});
+
+// Atualiza o Status do Pedido (Gatilhos 2 e 3 do CRM Kanban)
+app.put('/api/pdv/pedidos/:id/status', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Token não fornecido' });
+  }
+  const token = authHeader.split(' ')[1];
+  
+  try {
+    const jwtSecret = env.SUPABASE_JWT_SECRET || 'super-secret-supabase-jwt-key-default';
+    const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
+    const restauranteId = decoded.sub;
+
+    const pedidoId = req.params.id;
+    const { status } = req.body;
+
+    if (!pedidoId || !status) {
+      return res.status(400).json({ error: 'pedidoId e status são obrigatórios' });
+    }
+
+    // Busca pedido atual para validar a transição e pegar o cliente
+    const { data: pedido, error: fetchErr } = await supabaseAdmin
+      .from('pedidos')
+      .select('*')
+      .eq('id', pedidoId)
+      .eq('restaurante_id', restauranteId)
+      .single();
+
+    if (fetchErr || !pedido) throw new Error('Pedido não encontrado');
+
+    const statusAnterior = pedido.status;
+
+    // Atualiza status do Pedido
+    await supabaseAdmin
+      .from('pedidos')
+      .update({ status })
+      .eq('id', pedidoId);
+
+    // Gatilhos do Kanban CRM (se houver cliente vinculado)
+    if (pedido.cliente_id) {
+      // GATILHO 2: Pedido saiu de NOVO para EM_PREPARO (foi pra cozinha)
+      if (statusAnterior === 'NOVO' && status === 'EM_PREPARO') {
+        await supabaseAdmin.from('clientes_crm').update({
+          estagio_pipeline: 'pedido_em_andamento',
+          bloqueio_cron_manual: false
+        }).eq('id', pedido.cliente_id);
+
+        await supabaseAdmin.from('historico_crm').insert({
+          cliente_id: pedido.cliente_id,
+          estagio_anterior: null, // Pode ser dinâmico depois, mas para simplificar
+          estagio_novo: 'pedido_em_andamento',
+          motivo: 'evento_pedido'
+        });
+      }
+
+      // GATILHO 3: Pedido CONCLUIDO
+      if (statusAnterior !== 'CONCLUIDO' && status === 'CONCLUIDO') {
+        const { error: updateErr } = await supabaseAdmin.rpc('atualizar_pedido_concluido', {
+          p_cliente_id: pedido.cliente_id,
+          p_valor_total: pedido.valor_total
+        });
+
+        if (updateErr) {
+          console.error('[Kanban CRM] Erro ao atualizar gatilho 3 (Concluido):', updateErr);
+        }
+      }
+    }
+
+    return res.json({ success: true, novoStatus: status });
+  } catch (err: any) {
+    console.error(err);
+    return res.status(500).json({ error: 'Erro ao atualizar status do pedido' });
+  }
 });
 
 // Healthcheck

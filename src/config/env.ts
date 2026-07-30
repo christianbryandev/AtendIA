@@ -10,6 +10,9 @@ const envSchema = z.object({
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   SUPABASE_JWT_SECRET: z.string().optional(),
+  ENCRYPTION_KEY: z.string()
+    .length(64, 'ENCRYPTION_KEY deve ter exatamente 64 caracteres.')
+    .regex(/^[0-9a-fA-F]+$/, 'ENCRYPTION_KEY deve ser uma string hexadecimal válida.'),
   GROQ_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   META_WHATSAPP_TOKEN: z.string().optional(),

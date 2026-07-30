@@ -160,14 +160,13 @@
             const data = await response.json();
 
             if (response.ok && data.success) {
-                // Guarda o token da sessão e o ID do restaurante
-                localStorage.setItem('restaurante_id', data.restauranteId);
-                localStorage.setItem('restaurante_nome', data.restauranteNome);
+                // Guarda apenas o JWT assinado
+                localStorage.setItem('auth_token', data.token);
                 
                 // Redireciona para o Painel Principal
                 window.location.href = '/index.html';
             } else {
-                errorBox.innerText = data.error || 'Credenciais inválidas.';
+                errorBox.innerText = data.error || 'E-mail ou senha incorretos.';
                 errorBox.style.display = 'block';
             }
         } catch (err) {

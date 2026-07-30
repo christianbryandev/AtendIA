@@ -6,12 +6,15 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "encrypt-token": "tsx scripts/encrypt-token.ts",
+    "test-pedido": "tsx scripts/test-pedido.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.48.0",
     "@types/bcrypt": "^6.0.0",
     "@types/jsonwebtoken": "^9.0.10",
+    "axios": "^1.19.0",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

@@ -160,9 +160,32 @@
 </div>
 
 <script>
+    function getAuthToken() {
+        const token = localStorage.getItem('auth_token');
+        if (!token) {
+            window.location.href = '/login.html';
+            return null;
+        }
+        return token;
+    }
+
     async function carregarCRM() {
+        const token = getAuthToken();
+        if (!token) return;
+
         try {
-            const res = await fetch('/api/crm/clientes');
+            const res = await fetch('/api/crm/clientes', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            
+            if (res.status === 401) {
+                localStorage.removeItem('auth_token');
+                window.location.href = '/login.html';
+                return;
+            }
+
             const data = await res.json();
             const clientes = data.clientes || [];
 
@@ -211,15 +234,28 @@
     }
 
     async function dispararReativacao() {
+        const token = getAuthToken();
+        if (!token) return;
+
         const confirmar = confirm("Deseja disparar a campanha automática de reativação com cupom de 10% OFF para clientes ausentes há mais de 15 dias?");
         if (!confirmar) return;
 
         try {
             const res = await fetch('/api/crm/reativacao', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ restauranteId: 'default-restaurant-id', diasAusente: 15 })
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ diasAusente: 15 })
             });
+
+            if (res.status === 401) {
+                localStorage.removeItem('auth_token');
+                window.location.href = '/login.html';
+                return;
+            }
+
             const data = await res.json();
             alert(data.mensagem || "Campanha disparada com sucesso!");
             carregarCRM();
