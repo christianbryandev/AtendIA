@@ -21,7 +21,7 @@ describe('Hero', () => {
     const { container } = wrap();
     const texto = container.textContent ?? '';
     expect(texto).toContain('Teste sem risco por 7 dias');
-    expect(texto).not.toMatch(/gr[áa]tis/i);
+    expect(texto).not.toMatch(/gr[áa]tis|gratuit[oa]|gratuitamente|de gra[çc]a/i);
   });
 
   it('nao contem prova social inventada', () => {
@@ -29,5 +29,9 @@ describe('Hero', () => {
     const texto = container.textContent ?? '';
     expect(texto).not.toMatch(/\+?\s*\d{3,}\s*(restaurantes|clientes|pedidos processados)/i);
     expect(texto).not.toMatch(/mais de \d/i);
+    expect(texto).not.toMatch(/centenas de|milhares de|dezenas de/i);
+    expect(texto).not.toMatch(/confiam|confia em n[óo]s/i);
+    expect(texto).not.toMatch(/amado por|amada por/i);
+    expect(texto).not.toMatch(/lojistas|restaurantes de todo o brasil/i);
   });
 });

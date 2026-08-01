@@ -16,7 +16,7 @@ export default function ConversaDemo() {
   return (
     <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 shadow-sm sm:p-5">
       <div className="mb-4 flex items-center gap-2.5 border-b border-stone-200 pb-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-500 text-sm font-bold text-white">
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-700 text-sm font-bold text-white">
           P
         </div>
         <div>
@@ -35,10 +35,11 @@ export default function ConversaDemo() {
               className={[
                 'max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
                 msg.de === 'cliente'
-                  ? 'rounded-br-sm bg-brand-500 text-white'
+                  ? 'rounded-br-sm border border-brand-500/30 bg-brand-50 text-ink-800'
                   : 'rounded-bl-sm border border-stone-200 bg-white text-ink-800',
               ].join(' ')}
             >
+              <span className="sr-only">{msg.de === 'cliente' ? 'Cliente: ' : 'Atendimento: '}</span>
               {msg.audio ? (
                 <span className="flex items-center gap-2">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
