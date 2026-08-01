@@ -1,15 +1,37 @@
 import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
-type ButtonProps = {
+type ButtonBaseProps = {
   children: ReactNode;
   variant?: 'primary' | 'secondary';
-  to?: string;
-  href?: string;
-  onClick?: () => void;
   className?: string;
-  type?: 'button' | 'submit';
 };
+
+type ButtonAsButtonProps = ButtonBaseProps & {
+  onClick?: () => void;
+  type?: 'button' | 'submit';
+  to?: never;
+  href?: never;
+};
+
+type ButtonAsInternalLinkProps = ButtonBaseProps & {
+  to: string;
+  href?: never;
+  onClick?: never;
+  type?: never;
+};
+
+type ButtonAsExternalLinkProps = ButtonBaseProps & {
+  href: string;
+  to?: never;
+  onClick?: never;
+  type?: never;
+};
+
+type ButtonProps =
+  | ButtonAsButtonProps
+  | ButtonAsInternalLinkProps
+  | ButtonAsExternalLinkProps;
 
 const BASE =
   'inline-flex items-center justify-center rounded-lg px-6 py-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-700';
@@ -21,23 +43,17 @@ const VARIANTS = {
   secondary: 'bg-white text-ink-800 border border-stone-300 hover:bg-stone-50',
 } as const;
 
-export default function Button({
-  children,
-  variant = 'primary',
-  to,
-  href,
-  onClick,
-  className = '',
-  type = 'button',
-}: ButtonProps) {
+export default function Button(props: ButtonProps) {
+  const { children, variant = 'primary', className = '' } = props;
   const classes = `${BASE} ${VARIANTS[variant]} ${className}`.trim();
 
-  if (to) {
-    return <Link to={to} className={classes}>{children}</Link>;
+  if (props.to) {
+    return <Link to={props.to} className={classes}>{children}</Link>;
   }
-  if (href) {
-    return <a href={href} className={classes}>{children}</a>;
+  if (props.href) {
+    return <a href={props.href} className={classes}>{children}</a>;
   }
+  const { onClick, type = 'button' } = props;
   return (
     <button type={type} onClick={onClick} className={classes}>
       {children}

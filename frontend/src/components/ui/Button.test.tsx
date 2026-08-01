@@ -29,3 +29,25 @@ describe('Button', () => {
     expect(screen.getByRole('button').className).toContain('w-full');
   });
 });
+
+// Os casos abaixo não são executados em runtime: existem apenas para que o
+// `tsc` confirme que a união discriminada rejeita combinações inválidas de
+// props. Se alguma combinação passar a compilar, o `@ts-expect-error`
+// correspondente vira erro de compilação.
+function _invalidPropCombinations() {
+  // @ts-expect-error 'to' e 'href' juntos não são permitidos
+  <Button to="/cadastro" href="https://example.com">Inválido</Button>;
+
+  // @ts-expect-error 'onClick' junto com 'to' não é permitido
+  <Button to="/cadastro" onClick={() => {}}>Inválido</Button>;
+
+  // @ts-expect-error 'type' junto com 'to' não é permitido
+  <Button to="/cadastro" type="submit">Inválido</Button>;
+
+  // @ts-expect-error 'onClick' junto com 'href' não é permitido
+  <Button href="https://example.com" onClick={() => {}}>Inválido</Button>;
+
+  // @ts-expect-error 'type' junto com 'href' não é permitido
+  <Button href="https://example.com" type="submit">Inválido</Button>;
+}
+void _invalidPropCombinations;
