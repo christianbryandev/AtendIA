@@ -1,5 +1,11 @@
+import Hero from './sections/Hero';
+import Problema from './sections/Problema';
+
 export default function Landing() {
   return (
-    <h1 className="sr-only">AtendIA</h1>
+    <>
+      <Hero />
+      <Problema />
+    </>
   );
 }
