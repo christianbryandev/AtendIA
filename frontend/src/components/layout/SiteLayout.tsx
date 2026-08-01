@@ -52,8 +52,14 @@ export default function SiteLayout() {
 
   return (
     <div className="flex min-h-screen flex-col">
+      <a
+        href="#conteudo-principal"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:rounded-lg focus:bg-brand-700 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
+      >
+        Pular para o conteúdo
+      </a>
       <Header />
-      <main className="flex-1">
+      <main id="conteudo-principal" className="flex-1">
         <Outlet />
       </main>
       <Footer />

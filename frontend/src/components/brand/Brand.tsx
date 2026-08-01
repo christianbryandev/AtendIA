@@ -16,9 +16,16 @@ type BrandProps = {
 export default function Brand({ iconClassName = 'h-8 w-8', textClassName = 'text-lg' }: BrandProps) {
   return (
     <span className="flex items-center gap-2">
-      <Logo variant="icon" className={iconClassName} aria-hidden="true" />
+      <Logo className={iconClassName} aria-hidden="true" />
       <span className={`font-bold ${textClassName}`}>
         <span className="text-ink-800">Atend</span>
+        {/* brand-500 sobre branco da 2,6:1 de contraste, abaixo do minimo
+            WCAG AA de 4,5:1 para texto (ver src/design/contrast.test.ts).
+            Em qualquer outro lugar isso seria bug — e por isso Button.tsx
+            usa brand-700, nao brand-500, para texto normal. Aqui e
+            excecao deliberada: "IA" faz parte do logotipo/wordmark da
+            marca, e o WCAG isenta texto de logotipo do requisito de
+            contraste. Nao troque a cor achando que e um bug esquecido. */}
         <span className="text-brand-500">IA</span>
       </span>
     </span>

@@ -2,23 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import Logo from './Logo';
 
-describe('Logo', () => {
-  it('usa as tres cores da marca na versao completa', () => {
-    const { container } = render(<Logo variant="full" />);
-    const paths = container.querySelectorAll('path');
-    expect(paths).toHaveLength(3);
-    expect(paths[0].getAttribute('fill')).toBe('#10B981'); // icone
-    expect(paths[1].getAttribute('fill')).toBe('#292524'); // "Atend"
-    expect(paths[2].getAttribute('fill')).toBe('#10B981'); // "IA"
-  });
+// A variante "full" (icone + wordmark) foi removida: o unico consumidor
+// (Brand) sempre usava so o icone, e o wordmark ia morto para o bundle.
+// Logo agora so renderiza o icone.
 
-  it('renderiza apenas o icone na variante icon', () => {
-    const { container } = render(<Logo variant="icon" />);
-    expect(container.querySelectorAll('path')).toHaveLength(1);
+describe('Logo', () => {
+  it('renderiza apenas o path do icone, na cor da marca', () => {
+    const { container } = render(<Logo />);
+    const paths = container.querySelectorAll('path');
+    expect(paths).toHaveLength(1);
+    expect(paths[0].getAttribute('fill')).toBe('#10B981');
   });
 
   it('tem rotulo acessivel', () => {
-    const { container } = render(<Logo variant="full" />);
+    const { container } = render(<Logo />);
     expect(container.querySelector('title')?.textContent).toBe('AtendIA');
   });
 
@@ -28,13 +25,20 @@ describe('Logo', () => {
     // podia encontrar nada, nao porque garantisse ausencia de fundo. Aqui
     // a asserção falha se qualquer <rect> (de qualquer cor) for adicionado
     // como fundo do svg.
-    const { container } = render(<Logo variant="full" />);
+    const { container } = render(<Logo />);
     expect(container.querySelectorAll('rect')).toHaveLength(0);
   });
 
   it('propaga className para o elemento svg', () => {
-    const { container } = render(<Logo variant="full" className="custom-logo" />);
+    const { container } = render(<Logo className="custom-logo" />);
     const svg = container.querySelector('svg');
     expect(svg).toHaveClass('custom-logo');
+  });
+
+  it('marca o icone como decorativo quando aria-hidden e passado', () => {
+    const { container } = render(<Logo aria-hidden="true" />);
+    const svg = container.querySelector('svg');
+    expect(svg).toHaveAttribute('aria-hidden', 'true');
+    expect(svg).not.toHaveAttribute('aria-label');
   });
 });

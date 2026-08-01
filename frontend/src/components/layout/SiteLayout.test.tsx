@@ -85,4 +85,12 @@ describe('SiteLayout — rolagem entre rotas', () => {
 
     expect(chamadasAposSegundoClique).toBeGreaterThan(chamadasAposPrimeiroClique);
   });
+
+  it('tem um skip link apontando para o conteudo principal', () => {
+    wrap(['/']);
+
+    const link = screen.getByRole('link', { name: 'Pular para o conteúdo' });
+    expect(link).toHaveAttribute('href', '#conteudo-principal');
+    expect(document.getElementById('conteudo-principal')?.tagName).toBe('MAIN');
+  });
 });

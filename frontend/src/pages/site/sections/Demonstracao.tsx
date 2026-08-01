@@ -1,13 +1,29 @@
 import Section from '../../../components/ui/Section';
 import ConversaDemo from './ConversaDemo';
 
+// Diferente da conversa do Hero (cliente recorrente que ja sabe o pedido):
+// aqui e um cliente novo e indeciso, que pergunta antes de decidir — o caso
+// que mais consome mensagens (e creditos) de atendimento.
+const CONVERSA_INDECISA = [
+  { de: 'cliente' as const, texto: 'Oi! Vocês têm pizza sem glúten?' },
+  { de: 'ia' as const, texto: 'Temos sim! A Margherita sem glúten sai R$ 54,90 no tamanho médio.' },
+  { de: 'cliente' as const, texto: 'E a de frango com catupiry, quanto fica no tamanho grande?' },
+  { de: 'ia' as const, texto: 'A Frango com Catupiry grande fica R$ 68,90. Quer que eu já monte o pedido?' },
+  { de: 'cliente' as const, texto: 'Pode ser essa, mas sem cebola, por favor' },
+  {
+    de: 'ia' as const,
+    texto: 'Fechado! 1 Pizza Grande Frango com Catupiry, sem cebola. Com a entrega de R$ 6,00 fica R$ 74,90. Confirma?',
+  },
+  { de: 'cliente' as const, texto: 'Confirmo!' },
+];
+
 const PEDIDO = {
-  numero: '#1042',
-  cliente: 'Marina S.',
-  itens: [{ qtd: 2, nome: 'Pizza Grande Calabresa', valor: 'R$ 90,00' }],
+  numero: '#1043',
+  cliente: 'Rafael M.',
+  itens: [{ qtd: 1, nome: 'Pizza Grande Frango c/ Catupiry (sem cebola)', valor: 'R$ 68,90' }],
   taxa: 'R$ 6,00',
-  total: 'R$ 96,00',
-  pagamento: 'Dinheiro — troco para R$ 100,00',
+  total: 'R$ 74,90',
+  pagamento: 'Pix',
 };
 
 export default function Demonstracao() {
@@ -24,7 +40,11 @@ export default function Demonstracao() {
       </div>
 
       <div className="mt-14 grid items-start gap-8 lg:grid-cols-2">
-        <ConversaDemo />
+        <ConversaDemo
+          nomeLoja="Pizzaria do Bairro"
+          avatarLetra="P"
+          mensagens={CONVERSA_INDECISA}
+        />
 
         <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between border-b border-stone-200 pb-3">
