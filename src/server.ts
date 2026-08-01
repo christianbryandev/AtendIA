@@ -667,6 +667,7 @@ app.put('/api/pdv/pedidos/:id/status', async (req, res) => {
       if (statusAnterior !== 'CONCLUIDO' && status === 'CONCLUIDO') {
         const { error: updateErr } = await supabaseAdmin.rpc('atualizar_pedido_concluido', {
           p_cliente_id: pedido.cliente_id,
+          p_restaurante_id: restauranteId,
           p_valor_total: pedido.valor_total
         });
 

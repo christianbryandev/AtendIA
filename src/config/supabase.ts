@@ -2,7 +2,10 @@ import { createClient } from '@supabase/supabase-js';
 import { env } from './env.js';
 
 // 1. Cliente Admin para processamento de Webhooks públicos do WhatsApp & Workers assíncronos
-export const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY, {
+// Sem fallback para a anon key: se a service role key faltasse, este cliente
+// viraria anônimo em silêncio e todo query do webhook passaria a retornar zero
+// linhas por RLS — falha fantasma. A ausência da chave quebra no boot (env.ts).
+export const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 

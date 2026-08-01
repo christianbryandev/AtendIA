@@ -8,7 +8,9 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  // Obrigatória: o cliente admin (webhook/workers) não tem fallback para a anon key.
+  // Sem ela, todo query do webhook retornaria zero linhas por RLS, silenciosamente.
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, 'SUPABASE_SERVICE_ROLE_KEY é obrigatória.'),
   SUPABASE_JWT_SECRET: z.string().min(32, 'O segredo JWT deve ter no mínimo 32 caracteres.'),
   CRON_SECRET: z.string().min(20, 'O segredo CRON deve ter no mínimo 20 caracteres.'),
   ENCRYPTION_KEY: z.string()
