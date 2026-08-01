@@ -53,8 +53,11 @@ export default function Demonstracao() {
               <dt className="font-semibold text-ink-800">Total</dt>
               <dd className="font-bold text-ink-800">{PEDIDO.total}</dd>
             </div>
-            <div className="rounded-lg bg-stone-50 px-3 py-2.5 text-xs text-ink-600">
-              {PEDIDO.pagamento}
+            <div className="flex justify-between">
+              <dt className="sr-only">Forma de pagamento</dt>
+              <dd className="w-full rounded-lg bg-stone-50 px-3 py-2.5 text-xs text-ink-600">
+                {PEDIDO.pagamento}
+              </dd>
             </div>
           </dl>
 
