@@ -463,7 +463,10 @@ Remove public/logo.png, que era a versao antiga em gradiente roxo/laranja
 **Interfaces:**
 - Consumes: tokens do Task 1
 - Produces:
-  - `<Button variant="primary" | "secondary" as="button" | "link" to?: string />`
+  - `<Button variant="primary" | "secondary" />` — união discriminada de três
+    formas mutuamente exclusivas: **botão** (aceita `onClick`, `type`),
+    **link interno** (`to`) e **link externo** (`href`). Combinar campos de
+    formas diferentes é erro de compilação, não falha silenciosa em runtime
   - `<Container className?: string />` — largura máxima e padding lateral
   - `<Section id?: string tone="white" | "muted" className?: string />`
 
