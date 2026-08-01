@@ -34,4 +34,12 @@ describe('Hero', () => {
     expect(texto).not.toMatch(/amado por|amada por/i);
     expect(texto).not.toMatch(/lojistas|restaurantes de todo o brasil/i);
   });
+
+  it('nao usa urgencia falsa', () => {
+    const { container } = wrap();
+    const texto = container.textContent ?? '';
+    expect(texto).not.toMatch(
+      /só hoje|últimas vagas|oferta expira|restam \d|por tempo limitado|vagas limitadas|não perca|aproveite agora|oferta por tempo/i
+    );
+  });
 });

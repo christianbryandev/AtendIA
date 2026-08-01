@@ -22,10 +22,14 @@ describe('Logo', () => {
     expect(container.querySelector('title')?.textContent).toBe('AtendIA');
   });
 
-  it('nao tem fundo branco solido', () => {
+  it('nao desenha fundo solido (nenhum retangulo de preenchimento)', () => {
+    // O teste anterior procurava rect[fill="#FFFFFF"], mas o componente
+    // nunca renderiza <rect> nenhum — so passava porque a asserção nunca
+    // podia encontrar nada, nao porque garantisse ausencia de fundo. Aqui
+    // a asserção falha se qualquer <rect> (de qualquer cor) for adicionado
+    // como fundo do svg.
     const { container } = render(<Logo variant="full" />);
-    const rects = container.querySelectorAll('rect[fill="#FFFFFF"], rect[fill="#fff"]');
-    expect(rects).toHaveLength(0);
+    expect(container.querySelectorAll('rect')).toHaveLength(0);
   });
 
   it('propaga className para o elemento svg', () => {
