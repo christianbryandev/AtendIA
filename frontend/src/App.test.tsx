@@ -35,7 +35,12 @@ describe('Roteamento', () => {
     '%s abre a pagina legal correspondente',
     async (rota) => {
       renderEm(rota);
-      expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
+      // LegalPage agora e lazy (react-markdown + remark-gfm ficam fora do
+      // bundle da landing), entao o import dinamico pode levar mais que o
+      // timeout padrao de findByRole no ambiente de teste.
+      expect(
+        await screen.findByRole('heading', { level: 1 }, { timeout: 5000 })
+      ).toBeInTheDocument();
     }
   );
 });

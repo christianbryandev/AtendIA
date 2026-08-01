@@ -5,11 +5,13 @@ import Landing from './pages/site/Landing';
 import Sobre from './pages/site/Sobre';
 import Cadastro from './pages/site/Cadastro';
 import NaoEncontrado from './pages/site/NaoEncontrado';
-import LegalPage from './pages/site/LegalPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // O painel so e baixado quando o usuario entra nele. Sem isso, um
 // visitante da landing carregaria o bundle inteiro para ver a home.
+// LegalPage tambem e lazy: ela arrasta react-markdown + remark-gfm + os
+// tres documentos legais inteiros, que nenhum visitante da home precisa.
+const LegalPage = lazy(() => import('./pages/site/LegalPage'));
 const Login = lazy(() => import('./pages/app/Login'));
 const Dashboard = lazy(() => import('./pages/app/Dashboard'));
 const Crm = lazy(() => import('./pages/app/Crm'));
