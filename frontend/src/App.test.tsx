@@ -30,4 +30,12 @@ describe('Roteamento', () => {
     renderEm('/rota-que-nao-existe');
     expect(await screen.findByText(/página não encontrada/i)).toBeInTheDocument();
   });
+
+  it.each(['/termos', '/privacidade', '/exclusao-de-dados'])(
+    '%s abre a pagina legal correspondente',
+    async (rota) => {
+      renderEm(rota);
+      expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
+    }
+  );
 });

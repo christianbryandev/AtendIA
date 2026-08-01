@@ -5,6 +5,7 @@ import Landing from './pages/site/Landing';
 import Sobre from './pages/site/Sobre';
 import Cadastro from './pages/site/Cadastro';
 import NaoEncontrado from './pages/site/NaoEncontrado';
+import LegalPage from './pages/site/LegalPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // O painel so e baixado quando o usuario entra nele. Sem isso, um
@@ -27,7 +28,9 @@ export default function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/sobre" element={<Sobre />} />
           <Route path="/cadastro" element={<Cadastro />} />
-          {/* As tres rotas legais entram no Task 6, junto com o LegalPage */}
+          <Route path="/termos" element={<LegalPage documento="termos" />} />
+          <Route path="/privacidade" element={<LegalPage documento="privacidade" />} />
+          <Route path="/exclusao-de-dados" element={<LegalPage documento="exclusao-de-dados" />} />
           <Route path="*" element={<NaoEncontrado />} />
         </Route>
 
