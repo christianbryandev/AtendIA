@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Container from '../ui/Container';
 import Button from '../ui/Button';
-import Logo from '../brand/Logo';
+import Brand from '../brand/Brand';
 
 const NAV = [
   { rotulo: 'Como funciona', href: '/#como-funciona' },
@@ -18,11 +18,7 @@ export default function Header() {
     <header className="sticky top-0 z-50 border-b border-stone-200 bg-white/90 backdrop-blur">
       <Container className="flex h-16 items-center justify-between">
         <Link to="/" aria-label="AtendIA — página inicial" className="flex items-center gap-2">
-          <Logo variant="icon" className="h-8 w-8" />
-          <span className="text-lg font-bold">
-            <span className="text-ink-800">Atend</span>
-            <span className="text-brand-500">IA</span>
-          </span>
+          <Brand iconClassName="h-8 w-8" textClassName="text-lg" />
         </Link>
 
         <nav className="hidden items-center gap-7 lg:flex">
@@ -50,7 +46,7 @@ export default function Header() {
           type="button"
           onClick={() => setAberto(!aberto)}
           aria-expanded={aberto}
-          aria-label="Abrir menu"
+          aria-label={aberto ? 'Fechar menu' : 'Abrir menu'}
           className="lg:hidden rounded-lg p-2 text-ink-800 hover:bg-stone-100"
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

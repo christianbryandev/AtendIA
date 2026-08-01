@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import Container from '../ui/Container';
-import Logo from '../brand/Logo';
+import Brand from '../brand/Brand';
 
 const GRUPOS = [
   {
@@ -31,13 +31,7 @@ export default function Footer() {
       <Container>
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <div className="flex items-center gap-2">
-              <Logo variant="icon" className="h-9 w-9" />
-              <span className="text-xl font-bold">
-                <span className="text-ink-800">Atend</span>
-                <span className="text-brand-500">IA</span>
-              </span>
-            </div>
+            <Brand iconClassName="h-9 w-9" textClassName="text-xl" />
             <p className="mt-4 max-w-xs text-sm text-ink-600">
               Atendimento por inteligência artificial no WhatsApp para delivery.
             </p>
