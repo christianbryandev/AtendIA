@@ -112,14 +112,52 @@ Medi-los juntos esconderia o custo e confundiria o cliente.
 ### Cota do plano
 
 - **10.000 créditos de IA/mês** — ilustrado como "atende ≈300 pedidos/mês"
-- **300 disparos de campanha/mês** — teto de ≈R$ 105
+- **100 disparos de campanha/mês** — teto de ≈R$ 35
 - Excedente vendido em pacotes avulsos dentro do painel (ciclo futuro)
+
+**Teto de custo variável: ≈R$ 85** (47% da receita), no cenário improvável de o
+cliente esgotar as duas cotas. A maioria consumirá bem menos.
+
+Os disparos foram cortados de 300 para 100 porque 300 × R$ 0,35 = R$ 105
+consumiria 58% da receita num único item — e, somado ao teto dos créditos,
+zeraria a margem justamente no cliente que mais usa o produto. Diferente das
+estimativas de consumo de IA, esse número não é estimativa: é preço tabelado da
+Meta.
+
+### Quantos pedidos os 10.000 créditos cobrem
+
+A conversa média **não** tem 10 mensagens. Mistura realista, considerando que o
+sistema guarda `ultimo_pedido_json` para repetição em um clique:
+
+| Tipo de conversa | Fatia | Mensagens |
+|---|---|---|
+| Recorrente ("o de sempre") | 40% | ~3 |
+| Novo / indeciso | 35% | ~9 |
+| Curioso que não compra | 25% | ~3 |
+
+A cada 100 conversas: 510 mensagens → 75 pedidos = **6,8 mensagens por pedido**,
+já embutindo o desperdício de quem não compra.
+
+**O limite é definido pela fatia de áudio, não pelo tamanho da conversa:**
+
+| Fatia de áudio | Créditos/pedido | Pedidos com 10.000 |
+|---|---|---|
+| 30% | 21 | ~475 |
+| 50% | 30 | ~330 |
+| 60% | 35 | ~285 |
+
+Pior caso realista — restaurante recém-chegado, sem base de recorrentes, com 50%
+de áudio: **~220 pedidos**. Daí o "≈300" ser uma ilustração conservadora e
+defensável, com nota de rodapé explicando que o consumo varia conforme o uso de
+áudio.
 
 ### Confiança dos números
 
-- **Sólido:** preços de API e a razão de ~9x entre áudio e texto
-- **Estimado:** tokens por mensagem, duração dos áudios, mix texto/áudio, câmbio
-- **Desconhecido:** volume real de pedidos dos clientes
+- **Sólido:** preços de API; a razão de ~9x entre áudio e texto; o custo dos
+  templates de marketing da Meta
+- **Estimado:** tokens por mensagem, duração dos áudios, mix texto/áudio, câmbio,
+  distribuição dos tipos de conversa
+- **Desconhecido:** volume real de pedidos e fatia real de áudio dos clientes
 
 A tabela `creditos_ia` já registra cada consumo. **Medir o uso real dos
 primeiros clientes antes de tratar a cota como compromisso contratual.** É mais
@@ -135,6 +173,11 @@ Implementá-lo é trabalho de backend e **não faz parte desta entrega**:
 - Criar o medidor separado de disparos de campanha
 - Trocar `whisper-large-v3` por `whisper-large-v3-turbo`: 2,8x mais barato
   (US$ 0,04/h vs US$ 0,111/h), diferença de qualidade marginal
+- **Substituir o UUID pelo índice curto no cardápio do prompt.** Em
+  `openai-agent.ts` cada produto entra como
+  `- [ID: 550e8400-e29b-41d4-a716-446655440000] Nome ...`; o UUID custa ~20
+  tokens e tokeniza mal. Usando `[ID: 42]` com mapeamento no código, economiza
+  ~1.200 tokens por mensagem num cardápio de 60 itens — **~34% do custo do LLM**
 
 **Dependência:** esses três itens precisam estar prontos antes de a landing ir
 ao ar, senão a página anuncia uma regra de cobrança que o sistema não aplica.
@@ -186,9 +229,10 @@ explícita no disco, não só na configuração.
 
 - `react-router-dom` está em `devDependencies` — dependência de runtime, move para `dependencies`
 - `public/logo.png` está na versão antiga (gradiente roxo/laranja) — remover
-- Logo verde: o SVG disponível é auto-trace monocromático de 14 sub-traçados;
-  dividir em ícone / "Atend" / "IA" e recolorir. **Preferir o vetor original se
-  o autor da logo o tiver**
+- Logo verde: o vetor original **não existe** (confirmado com o Christian). O
+  arquivo disponível é auto-trace monocromático de 14 sub-traçados. Dividir por
+  faixa de coordenada — ícone (y < 730), "Atend" e "IA" — e recolorir conforme o
+  design system. Curvas são aproximadas; aceitável para web
 
 ---
 
@@ -260,15 +304,20 @@ abaixo (**créditos**), com ⓘ expansível explicando "texto usa 1, áudio usa 
 Loja de créditos mencionada em uma linha discreta.
 
 O "≈300 pedidos" é **estimativa ilustrativa** e deve aparecer com "≈" e nota de
-rodapé: *"estimativa baseada em uso médio; o limite contratual são os 10.000
-créditos"*. Sem isso, vira promessa não controlável — mesmo risco de CDC da
-oferta.
+rodapé: *"estimativa de uso médio; o consumo varia conforme quanto do seu
+atendimento for por áudio. O limite contratual são os 10.000 créditos."* Sem
+isso, vira promessa não controlável — mesmo risco de CDC da oferta.
 
 ### FAQ
 
 Preciso trocar meu número? · Funciona com o número que já uso? · E se a IA errar
-um pedido? · Meu cardápio do iFood entra automático? · Posso cancelar quando
-quiser? · Meus dados e os dos meus clientes estão seguros?
+um pedido? · Meu cardápio do iFood entra automático? · **E se meus créditos
+acabarem no meio do mês?** · Posso cancelar quando quiser? · Meus dados e os dos
+meus clientes estão seguros?
+
+A pergunta sobre esgotamento da cota é obrigatória: os Termos preveem suspensão
+do atendimento automático (painel e PDV seguem funcionando), e o comprador
+precisa saber disso **antes** de pagar.
 
 ### Rodapé
 
@@ -311,10 +360,21 @@ que a redação aqui não garante. Revisão por advogado recomendada após a pri
 receita — revisar texto pronto custa fração de redigir do zero, e o SEBRAE
 oferece orientação jurídica gratuita a MEI.
 
-**Pendências que dependem de decisão do Christian** (sem elas os documentos
-ficam imprecisos): prazo de retenção de dados após cancelamento, e-mail do
-encarregado de dados (LGPD Art. 41), comarca de foro, e política de reembolso
-além dos 7 dias legais.
+**Decisões tomadas** (2026-08-01), já refletidas nas minutas:
+
+| Tema | Decisão |
+|---|---|
+| Retenção após cancelamento | 90 dias; dados fiscais 5 anos, separados |
+| Encarregado de dados | christianpereira.mtx@gmail.com — **trocar por `privacidade@<domínio>`** quando o domínio existir |
+| Foro | Comarca de Ribeirão Preto/SP |
+| Cancelamento | Sem multa, sem fidelidade, acesso até o fim do período pago |
+
+**Minutas escritas e commitadas** em `docs/legal/`: `privacidade.md`,
+`termos.md`, `exclusao-de-dados.md`. A implementação converte esses arquivos em
+páginas React.
+
+⚠️ A página de exclusão descreve um botão "Excluir minha conta" no painel, que
+ainda não existe. **Até o ciclo 3, exibir apenas a Opção B (e-mail).**
 
 ### Dados de cartão nunca passarão pelo servidor
 
@@ -330,7 +390,29 @@ sob medida.
 
 ---
 
+### Envio do cardápio em PDF/imagem (ciclo 3/4)
+
+A IA deve poder **enviar** o cardápio em PDF ou imagem quando o cliente pedir.
+Custo desprezível: mídia dentro da janela de 24h é gratuita na Meta, e ainda
+reduz tokens de saída e caracteres de TTS, já que a IA para de narrar o cardápio.
+
+**O arquivo não substitui o cardápio estruturado.** A IA continua precisando dos
+produtos no banco para informar preço, calcular total e chamar `finalizar_pedido`
+com os IDs corretos — um PDF é imagem para humano, não dado. Se o lojista subir
+só o arquivo e não cadastrar produtos, o atendimento automático não funciona; o
+painel precisa deixar isso explícito no cadastro.
+
+Falta implementar: `sendWhatsAppDocumentMessage`/`sendWhatsAppImageMessage`
+(hoje `meta-cloud-api.ts` só envia texto e áudio), campo de arquivo em
+`restaurantes` com upload no Storage, e uma ferramenta `enviar_cardapio`
+acionável pela IA.
+
+Só pode ser anunciado na landing se estiver funcionando quando ela for ao ar.
+
+---
+
 ## 8. Aprovação
 
 Blocos 1 (arquitetura), 2 (design system) e 3 (conteúdo) aprovados por Christian
-em 2026-08-01. Próximo passo: plano de implementação.
+em 2026-08-01, com os ajustes de cota acordados na revisão final. Próximo passo:
+plano de implementação.
