@@ -38,6 +38,10 @@ export default function Preco() {
             <p className="mt-1 text-sm text-ink-600">
               Se não gostar, devolvemos 100% do valor, sem burocracia.
             </p>
+            <p className="mt-3 border-t border-stone-200 pt-3 text-sm font-semibold text-ink-800">
+              A cobrança acontece na contratação; se pedir reembolso em até 7
+              dias, devolvemos 100% do valor.
+            </p>
           </div>
 
           <Button to="/cadastro" className="mt-5 w-full">Começar agora</Button>

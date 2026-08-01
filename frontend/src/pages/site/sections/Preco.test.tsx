@@ -34,6 +34,13 @@ describe('Preco', () => {
     expect(texto).toMatch(/áudio/i);
   });
 
+  it('deixa explicito que a cobranca acontece na contratacao, evitando a expectativa enganosa de "gratis"', () => {
+    const { container } = wrap();
+    expect(container.textContent).toContain(
+      'A cobrança acontece na contratação; se pedir reembolso em até 7 dias, devolvemos 100% do valor.'
+    );
+  });
+
   it('o CTA leva ao cadastro', () => {
     wrap();
     expect(screen.getByRole('link', { name: 'Começar agora' }))
