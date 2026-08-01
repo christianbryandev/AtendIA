@@ -1,5 +1,16 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Link } from 'react-router-dom';
+
+function isLinkExterno(href: string | undefined): boolean {
+  if (!href) return true;
+  return (
+    href.startsWith('#') ||
+    href.startsWith('mailto:') ||
+    href.startsWith('http://') ||
+    href.startsWith('https://')
+  );
+}
 
 export default function Prose({ markdown }: { markdown: string }) {
   return (
@@ -20,13 +31,31 @@ export default function Prose({ markdown }: { markdown: string }) {
           ul: ({ children }) => <ul className="list-disc space-y-1.5 pl-5">{children}</ul>,
           ol: ({ children }) => <ol className="list-decimal space-y-1.5 pl-5">{children}</ol>,
           strong: ({ children }) => <strong className="font-semibold text-ink-800">{children}</strong>,
-          a: ({ href, children }) => (
-            <a href={href} className="font-medium text-brand-700 underline underline-offset-2">{children}</a>
-          ),
+          a: ({ href, children }) => {
+            const className = 'font-medium text-brand-700 underline underline-offset-2';
+            if (!isLinkExterno(href)) {
+              return (
+                <Link to={href as string} className={className}>
+                  {children}
+                </Link>
+              );
+            }
+            return (
+              <a href={href} className={className}>
+                {children}
+              </a>
+            );
+          },
           blockquote: ({ children }) => (
             <blockquote className="rounded-lg border-l-4 border-brand-500 bg-brand-50 px-4 py-3">{children}</blockquote>
           ),
-          hr: () => <hr className="!my-10 border-stone-200" />,
+          // A separacao visual entre secoes e responsabilidade exclusiva da
+          // borda superior do h2 (mecanismo unico, sempre presente). Os
+          // documentos usam "---" de forma inconsistente antes dos titulos
+          // (faltando em algumas secoes, duplicado em outras), entao o hr
+          // do markdown nao renderiza nada para nao gerar regua dupla nem
+          // depender da formatacao do conteudo.
+          hr: () => null,
           // Tabelas precisam rolar sozinhas: o corpo da pagina nunca
           // deve rolar na horizontal no celular.
           table: ({ children }) => (
