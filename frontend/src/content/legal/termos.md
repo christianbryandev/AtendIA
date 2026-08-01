@@ -41,7 +41,7 @@ de crédito informado no cadastro.
 | Item | Quantidade mensal |
 |---|---|
 | Créditos de atendimento por IA | **10.000** |
-| Disparos de campanha de reativação | **300** |
+| Disparos de campanha de reativação | **100** |
 | Pedidos, produtos e usuários | Ilimitados |
 
 **Como os créditos são consumidos:**
