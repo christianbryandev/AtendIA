@@ -14,7 +14,7 @@ export default function Section({
 }) {
   const bg = tone === 'muted' ? 'bg-stone-50' : 'bg-white';
   return (
-    <section id={id} className={`${bg} py-16 sm:py-24 ${className}`.trim()}>
+    <section id={id} className={`${bg} scroll-mt-16 py-16 sm:py-24 ${className}`.trim()}>
       <Container>{children}</Container>
     </section>
   );

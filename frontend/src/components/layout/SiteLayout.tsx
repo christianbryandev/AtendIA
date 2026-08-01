@@ -9,10 +9,17 @@ import Footer from './Footer';
  * ciclo 3, e nao deve herdar o cabecalho e o rodape institucionais.
  */
 export default function SiteLayout() {
-  const { hash } = useLocation();
+  const { hash, key } = useLocation();
 
   useEffect(() => {
-    if (!hash) return;
+    if (!hash) {
+      // Navegacao para uma rota nova sem ancora: vai para o topo. Sem isso,
+      // o visitante que rolou ate o rodape e navega para outra pagina (ex.:
+      // "Termos de Uso") cai no meio do documento, na posicao de rolagem
+      // herdada da pagina anterior.
+      window.scrollTo(0, 0);
+      return;
+    }
 
     const id = hash.slice(1);
     if (!id) return;
@@ -39,7 +46,9 @@ export default function SiteLayout() {
     frame = requestAnimationFrame(tentarRolar);
 
     return () => cancelAnimationFrame(frame);
-  }, [hash]);
+    // `key` muda a cada navegacao (mesmo para a mesma ancora), garantindo
+    // que clicar duas vezes no mesmo link re-role ate a secao.
+  }, [hash, key]);
 
   return (
     <div className="flex min-h-screen flex-col">
