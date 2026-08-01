@@ -30,7 +30,17 @@ recebe seu próprio ciclo spec → plano → implementação:
 - Qualquer código de pagamento, gateway ou formulário de cartão
 - Cadastro real de usuário (a rota `/cadastro` recebe um placeholder)
 - Qualquer tela do painel
-- **Redação do conteúdo jurídico** de Termos, Privacidade e Exclusão de Dados
+
+### Conteúdo jurídico — incluído como minuta
+
+Decisão revista em 2026-08-01: as minutas de Termos de Uso, Política de
+Privacidade e Instruções de Exclusão de Dados **serão redigidas nesta entrega**,
+como texto original derivado do sistema real (ver seção 7).
+
+Descartado copiar/adaptar os documentos de concorrente: além de violação de
+direito autoral (Lei 9.610/98), a política descreveria uma operação que não é a
+do AtendIA — sob a LGPD isso vira declaração formal incorreta, e a revisão de
+app da Meta compara a política com o comportamento real do aplicativo.
 
 ### Critério de sucesso
 
@@ -280,15 +290,31 @@ real — não capturas falsas. Mas o painel ainda não existe. **Antes de public
 revisar a demonstração contra o produto pronto** e corrigir divergências. Caso
 contrário vira promessa falsa.
 
-### Conteúdo jurídico exige advogado
+### Conteúdo jurídico: minuta original, revisão posterior
 
-As páginas serão construídas com estrutura, navegação e formatação prontas, e
-marcações claras do que preencher. O texto jurídico **não será redigido aqui**.
+As minutas serão redigidas a partir do sistema real, não de modelo genérico nem
+de documento de terceiros. Base factual já levantada do código:
 
-O AtendIA processa dados pessoais dos restaurantes e dos clientes finais deles
-(nome, telefone, endereço, histórico de pedidos), atuando como controlador e
-operador sob a LGPD, e repassa dados a OpenAI, Groq e Meta — o que precisa estar
-declarado. Texto genérico copiado da internet é risco real.
+- **Dados coletados:** `clientes_crm` guarda nome, telefone WhatsApp, endereço de
+  entrega, histórico de pedidos e LTV dos clientes finais dos restaurantes
+- **Transferências internacionais** (LGPD Art. 33), a declarar nominalmente:
+  áudio → Groq (transcrição); texto → OpenAI (conversação e síntese de voz);
+  mensagens → Meta (WhatsApp Cloud API)
+- **Papéis LGPD:** controlador dos dados dos restaurantes; **operador** dos dados
+  dos clientes finais deles
+- **Segurança implementada, declarável:** tokens de integração em AES-256-CBC,
+  senhas em bcrypt, isolamento por tenant via RLS, HMAC SHA-256 no webhook
+
+**Limite explícito:** a minuta não é documento juridicamente validado. Cláusulas
+de limitação de responsabilidade, foro, rescisão e inadimplência têm implicações
+que a redação aqui não garante. Revisão por advogado recomendada após a primeira
+receita — revisar texto pronto custa fração de redigir do zero, e o SEBRAE
+oferece orientação jurídica gratuita a MEI.
+
+**Pendências que dependem de decisão do Christian** (sem elas os documentos
+ficam imprecisos): prazo de retenção de dados após cancelamento, e-mail do
+encarregado de dados (LGPD Art. 41), comarca de foro, e política de reembolso
+além dos 7 dias legais.
 
 ### Dados de cartão nunca passarão pelo servidor
 
