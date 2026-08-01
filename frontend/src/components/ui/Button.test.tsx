@@ -28,6 +28,22 @@ describe('Button', () => {
     wrap(<Button className="w-full">Ok</Button>);
     expect(screen.getByRole('button').className).toContain('w-full');
   });
+
+  it('usa dimensoes grandes por padrao (size md)', () => {
+    wrap(<Button>Ok</Button>);
+    const btn = screen.getByRole('button');
+    expect(btn.className).toContain('px-6');
+    expect(btn.className).toContain('py-3');
+  });
+
+  it('size="sm" aplica as dimensoes compactas, sem herdar as de md', () => {
+    wrap(<Button size="sm">Ok</Button>);
+    const classes = screen.getByRole('button').className.split(/\s+/);
+    expect(classes).toContain('px-5');
+    expect(classes).toContain('py-2.5');
+    expect(classes).not.toContain('px-6');
+    expect(classes).not.toContain('py-3');
+  });
 });
 
 // Os casos abaixo não são executados em runtime: existem apenas para que o

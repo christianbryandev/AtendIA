@@ -37,7 +37,7 @@ export default function Header() {
           <Link to="/login" className="text-sm font-medium text-ink-600 hover:text-brand-700">
             Entrar
           </Link>
-          <Button to="/cadastro" className="px-5 py-2.5 text-sm">
+          <Button to="/cadastro" size="sm">
             Começar agora
           </Button>
         </div>
