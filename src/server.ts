@@ -19,6 +19,7 @@ import { sendWhatsAppTextMessage, downloadWhatsAppMedia } from './services/whats
 import { upsertCustomerInCRM, runReactivationCampaign } from './services/crm/reactivation.js';
 import { importarCardapioiFood } from './services/ifood/ifood-api.js';
 import { decrypt } from './utils/crypto.js';
+import { validarPayloadCadastro } from './services/cadastro/criar-conta.js';
 
 const app = express();
 
@@ -341,6 +342,96 @@ app.post('/api/auth/refresh', async (req, res) => {
   } catch (err) {
     return res.status(401).json({ success: false, error: 'Token inválido.' });
   }
+});
+
+// ------------------------------------------------------------------
+// 3.2 CADASTRO DE NOVO RESTAURANTE
+// ------------------------------------------------------------------
+// A conta nasce antes do pagamento, com assinatura 'pendente'. Quem
+// abandona o Checkout retoma pelo login, sem recadastrar.
+app.post('/api/auth/cadastro', async (req, res) => {
+  const validacao = validarPayloadCadastro(req.body);
+
+  if (!validacao.ok) {
+    return res.status(validacao.status).json({ success: false, error: validacao.erro });
+  }
+
+  const d = validacao.dados;
+
+  // Unicidade antes de criar qualquer coisa, para não deixar
+  // restaurante órfão quando o insert seguinte falhar.
+  const { data: emailExistente } = await supabaseAdmin
+    .from('usuarios').select('id').eq('email', d.email).maybeSingle();
+
+  if (emailExistente) {
+    return res.status(409).json({ success: false, error: 'Já existe uma conta com este e-mail.' });
+  }
+
+  const { data: cnpjExistente } = await supabaseAdmin
+    .from('restaurantes').select('id').eq('cnpj', d.cnpj).maybeSingle();
+
+  if (cnpjExistente) {
+    return res.status(409).json({ success: false, error: 'Já existe uma conta com este CNPJ.' });
+  }
+
+  const { data: restaurante, error: erroRestaurante } = await supabaseAdmin
+    .from('restaurantes')
+    .insert([{
+      nome: d.restauranteNome,
+      cnpj: d.cnpj,
+      cep: d.cep,
+      logradouro: d.logradouro,
+      numero: d.numero,
+      complemento: d.complemento || null,
+      bairro: d.bairro,
+      cidade: d.cidade,
+      uf: d.uf,
+      ativo: true,
+    }])
+    .select('id')
+    .single();
+
+  if (erroRestaurante || !restaurante) {
+    console.error('[Cadastro] Falha ao criar restaurante:', erroRestaurante);
+    return res.status(500).json({ success: false, error: 'Não foi possível criar a conta. Tente novamente.' });
+  }
+
+  const senhaHash = await bcrypt.hash(d.senha, 10);
+
+  const { data: usuario, error: erroUsuario } = await supabaseAdmin
+    .from('usuarios')
+    .insert([{ restaurante_id: restaurante.id, email: d.email, senha_hash: senhaHash, nome: d.nome }])
+    .select('id')
+    .single();
+
+  if (erroUsuario || !usuario) {
+    console.error('[Cadastro] Falha ao criar usuário, revertendo restaurante:', erroUsuario);
+    await supabaseAdmin.from('restaurantes').delete().eq('id', restaurante.id);
+    return res.status(500).json({ success: false, error: 'Não foi possível criar a conta. Tente novamente.' });
+  }
+
+  const { error: erroAssinatura } = await supabaseAdmin
+    .from('assinaturas')
+    .insert([{ restaurante_id: restaurante.id, status: 'pendente' }]);
+
+  if (erroAssinatura) {
+    console.error('[Cadastro] Falha ao criar assinatura, revertendo:', erroAssinatura);
+    await supabaseAdmin.from('restaurantes').delete().eq('id', restaurante.id);
+    return res.status(500).json({ success: false, error: 'Não foi possível criar a conta. Tente novamente.' });
+  }
+
+  const token = jwt.sign(
+    {
+      sub: restaurante.id,
+      role: 'authenticated',
+      aud: 'authenticated',
+      user_metadata: { usuario_id: usuario.id, restaurante_id: restaurante.id, nome: d.nome },
+    },
+    getJwtSecret(),
+    { expiresIn: '12h' }
+  );
+
+  return res.status(201).json({ success: true, token, expiresIn: 43200 });
 });
 
 // ------------------------------------------------------------------
