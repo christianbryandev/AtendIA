@@ -147,9 +147,11 @@ Quem abandona o Checkout retoma pelo login normal, sem recadastrar.
 
 Rota única: `POST /api/webhooks/stripe`.
 
-**Corpo cru.** `express.json()` é montado globalmente em `src/server.ts` e
-destrói o corpo necessário para verificar o header `stripe-signature`. Montar
-`express.raw({ type: 'application/json' })` nesta rota, antes do parser global.
+**Corpo cru.** Verificar o header `stripe-signature` exige o corpo exatamente
+como veio. O `express.json()` global de `src/server.ts` já preserva isso em
+`req.rawBody` pela opção `verify` — o mesmo mecanismo que o webhook da Meta
+usa. Nenhum parser adicional é necessário; basta passar `req.rawBody` para
+`stripe.webhooks.constructEvent`.
 
 **Idempotência primeiro.** Todo evento tenta inserir seu `event.id` em
 `stripe_eventos_processados`. Violação de unique responde 200 e sai.
