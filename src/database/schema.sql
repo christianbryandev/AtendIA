@@ -152,6 +152,11 @@ CREATE TABLE IF NOT EXISTS caixas (
 );
 
 -- 7. TABELA DE ASSINATURAS (SAAS)
+-- ⚠️ OBSOLETA: esta definição não é a usada pelo sistema de cobrança.
+-- A forma correta (com stripe_customer_id, stripe_subscription_id,
+-- periodo_fim, UNIQUE em restaurante_id e CHECK de status) está na
+-- migration 006_assinaturas_creditos.sql. Mantida aqui como retrato
+-- histórico; não aplicar este bloco em banco novo.
 CREATE TABLE IF NOT EXISTS assinaturas (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     restaurante_id UUID REFERENCES restaurantes(id) ON DELETE CASCADE,

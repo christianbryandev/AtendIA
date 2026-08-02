@@ -50,12 +50,21 @@ COMMENT ON COLUMN restaurantes.creditos_cota IS 'Cota mensal do plano. Reseta pa
 COMMENT ON COLUMN restaurantes.creditos_avulsos IS 'Pacotes comprados à parte. Nunca expiram. Consumidos só depois que a cota zera.';
 
 -- Migra o saldo existente para a cota, para ninguém perder crédito.
+--
+-- O `creditos_disponiveis = 0` no mesmo UPDATE não é cosmético: depois
+-- desta migration nenhuma RPC decrementa creditos_disponiveis, então a
+-- coluna congelaria no valor pré-migração. Se a migration fosse
+-- reaplicada depois que o restaurante já gastou a cota (creditos_cota
+-- de volta a 0), a condição bateria de novo e o saldo antigo seria
+-- re-creditado inteiro. Zerando a origem, o mesmo saldo não pode ser
+-- consumido duas vezes e a migração vira idempotente de fato.
 UPDATE restaurantes
-SET creditos_cota = COALESCE(creditos_disponiveis, 0)
+SET creditos_cota = COALESCE(creditos_disponiveis, 0),
+    creditos_disponiveis = 0
 WHERE creditos_cota = 0 AND COALESCE(creditos_disponiveis, 0) > 0;
 
--- creditos_disponiveis fica na tabela por ora, sem uso, para o caso de
--- ser preciso auditar a migração. Removida numa migration futura.
+-- creditos_disponiveis fica na tabela por ora, sem uso (agora sempre
+-- zerada nos registros migrados). Removida numa migration futura.
 
 -- ------------------------------------------------------------
 -- 3. RASTRO DE ORIGEM NO LOG DE CONSUMO
@@ -67,6 +76,27 @@ ALTER TABLE creditos_ia ADD COLUMN IF NOT EXISTS origem VARCHAR(10);
 ALTER TABLE creditos_ia ADD COLUMN IF NOT EXISTS estornado BOOLEAN NOT NULL DEFAULT FALSE;
 
 COMMENT ON COLUMN creditos_ia.origem IS 'cota | avulso | misto — de qual saldo o consumo saiu.';
+
+-- CHECK de domínio da coluna origem. Permite NULL de propósito: os
+-- registros gravados antes desta migration não têm origem, e um CHECK
+-- que rejeitasse NULL faria o ALTER TABLE falhar na validação das
+-- linhas antigas. Em Postgres, CHECK com resultado NULL é aceito.
+-- Adicionado dentro de um DO $$ porque ADD CONSTRAINT não tem
+-- IF NOT EXISTS: sem isso a segunda execução da migration falharia.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'creditos_ia_origem_check'
+      AND conrelid = 'public.creditos_ia'::regclass
+  ) THEN
+    ALTER TABLE creditos_ia
+      ADD CONSTRAINT creditos_ia_origem_check
+      CHECK (origem IN ('cota', 'avulso', 'misto'));
+  END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_creditos_ia_pendente_estorno
   ON creditos_ia(restaurante_id, created_at DESC)
@@ -150,6 +180,18 @@ CREATE TABLE IF NOT EXISTS assinaturas (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Trigger de modtime, no mesmo padrão de restaurantes e pedidos
+-- (função update_updated_at_column(), definida em schema.sql). Sem ela
+-- a coluna updated_at nunca se atualizaria sozinha e o código de
+-- billing precisaria escrevê-la à mão em todo caminho — o que hoje só
+-- acontece em alguns. DROP antes do CREATE porque CREATE TRIGGER não
+-- aceita IF NOT EXISTS, e a migration precisa continuar idempotente.
+DROP TRIGGER IF EXISTS update_assinaturas_modtime ON assinaturas;
+CREATE TRIGGER update_assinaturas_modtime
+    BEFORE UPDATE ON assinaturas
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
 CREATE INDEX IF NOT EXISTS idx_assinaturas_customer ON assinaturas(stripe_customer_id);
 CREATE INDEX IF NOT EXISTS idx_assinaturas_subscription ON assinaturas(stripe_subscription_id);
 
@@ -200,8 +242,12 @@ DECLARE
   v_do_avulso INT;
   v_origem VARCHAR(10);
 BEGIN
-  IF current_setting('role') <> 'service_role' THEN
-    RAISE EXCEPTION 'Acesso negado.';
+  -- Mesma forma da 005: current_setting('role', true) devolve NULL em vez
+  -- de erro quando o GUC não está definido, e IS DISTINCT FROM trata esse
+  -- NULL como diferente. Com `<> 'service_role'` a comparação viraria NULL
+  -- e o IF não dispararia — o guard passaria batido.
+  IF current_setting('role', true) IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION 'Acesso negado: função administrativa';
   END IF;
 
   -- Preserva a validação da 005: p_qtd negativo faria o UPDATE abaixo
@@ -225,7 +271,13 @@ BEGIN
     RETURN FALSE;
   END IF;
 
-  v_da_cota := LEAST(v_cota, p_qtd);
+  -- GREATEST(v_cota, 0) blinda o split contra cota negativa. Se por
+  -- qualquer caminho creditos_cota ficasse negativo, LEAST(v_cota, p_qtd)
+  -- devolveria um valor negativo e v_do_avulso = p_qtd - negativo passaria
+  -- a debitar MAIS avulsos do que o pedido — ex.: cota -5, p_qtd 1
+  -- debitaria 6 avulsos. Com o GREATEST, cota negativa apenas significa
+  -- "nada a tirar da cota".
+  v_da_cota := LEAST(GREATEST(v_cota, 0), p_qtd);
   v_do_avulso := p_qtd - v_da_cota;
 
   IF v_do_avulso = 0 THEN
@@ -265,8 +317,9 @@ DECLARE
   v_log_id UUID;
   v_origem VARCHAR(10);
 BEGIN
-  IF current_setting('role') <> 'service_role' THEN
-    RAISE EXCEPTION 'Acesso negado.';
+  -- Mesma forma da 005 (ver comentário em consumir_creditos_ia).
+  IF current_setting('role', true) IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION 'Acesso negado: função administrativa';
   END IF;
 
   -- Mesma validação da 005: sem isso um p_qtd negativo debitaria saldo
@@ -277,20 +330,45 @@ BEGIN
 
   PERFORM id FROM restaurantes WHERE id = p_restaurante_id FOR UPDATE;
 
-  -- Reembolso sempre segue um consumo que acabou de acontecer na mesma
-  -- requisição, então o débito mais recente ainda não estornado é o
-  -- alvo certo.
+  -- Guard que existia na 005: restaurante inexistente é no-op silencioso.
+  -- Sem ele o fluxo seguiria até o INSERT em creditos_ia, que tem FK para
+  -- restaurantes, e o que era no-op viraria violação de chave estrangeira.
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+
+  -- Procura o débito que este reembolso estorna. O filtro por tipo_evento
+  -- e por creditos_consumidos = p_qtd é obrigatório, não um refinamento:
+  -- o servidor chama consumo e reembolso em RPCs separadas (transações
+  -- separadas) dentro de um handler de webhook assíncrono, então duas
+  -- mensagens do mesmo restaurante se intercalam de verdade e o "último
+  -- débito não estornado" pode ser o de OUTRA mensagem — creditando no
+  -- balde errado e marcando o log errado como estornado. Pior: created_at
+  -- usa NOW() (timestamp da transação), então logs da mesma transação
+  -- empatam e o ORDER BY desempata arbitrariamente. O chamador sempre
+  -- reembolsa exatamente o que consumiu, com o mesmo tipo, então esse par
+  -- identifica o débito com precisão muito maior.
   SELECT id, origem
     INTO v_log_id, v_origem
   FROM creditos_ia
   WHERE restaurante_id = p_restaurante_id
     AND estornado = FALSE
     AND creditos_consumidos > 0
+    AND tipo_evento = p_tipo
+    AND creditos_consumidos = p_qtd
   ORDER BY created_at DESC
   LIMIT 1;
 
-  -- Sem débito correspondente (caso não esperado), devolve para a cota:
-  -- é o balde conservador, porque expira.
+  -- Sem débito correspondente, não credita nada. Creditar "por via das
+  -- dúvidas" emitiria crédito do nada: um reembolso sem consumo por trás
+  -- (retry, chamada indevida, bug do chamador) viraria saldo real de graça.
+  -- Não achar contrapartida é sinal de que não há o que devolver.
+  IF v_log_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  -- Débito anterior à migration não tem origem gravada; volta para a cota,
+  -- que é o balde conservador (expira na virada do mês).
   IF v_origem IS NULL THEN
     v_origem := 'cota';
   END IF;
@@ -308,9 +386,7 @@ BEGIN
     WHERE id = p_restaurante_id;
   END IF;
 
-  IF v_log_id IS NOT NULL THEN
-    UPDATE creditos_ia SET estornado = TRUE WHERE id = v_log_id;
-  END IF;
+  UPDATE creditos_ia SET estornado = TRUE WHERE id = v_log_id;
 
   INSERT INTO creditos_ia (restaurante_id, tipo_evento, creditos_consumidos, motivo_reembolso, origem, estornado)
   VALUES (p_restaurante_id, p_tipo, -p_qtd, p_motivo, v_origem, TRUE);
@@ -328,15 +404,33 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
+DECLARE
+  v_linhas INT;
 BEGIN
-  IF current_setting('role') <> 'service_role' THEN
-    RAISE EXCEPTION 'Acesso negado.';
+  -- Mesma forma da 005 (ver comentário em consumir_creditos_ia).
+  IF current_setting('role', true) IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION 'Acesso negado: função administrativa';
+  END IF;
+
+  -- Zero é aceito de propósito (o cancelamento chama com 0 para esvaziar
+  -- a cota); negativo, não. Cota negativa corrompe o split de consumo:
+  -- ela faz o cálculo do avulso debitar mais créditos do que o pedido.
+  IF p_qtd IS NULL OR p_qtd < 0 THEN
+    RAISE EXCEPTION 'Quantidade de cota não pode ser negativa (recebido: %)', p_qtd;
   END IF;
 
   -- Reseta, não soma: a cota é mensal e sobra não acumula.
   UPDATE restaurantes
   SET creditos_cota = p_qtd
   WHERE id = p_restaurante_id;
+
+  -- Chamada pelo webhook do Stripe: um restaurante_id errado passaria
+  -- como sucesso e o pagamento entraria sem crédito nenhum ser dado,
+  -- sem sinal em lugar algum. Falha ruidosa para o webhook retentar.
+  GET DIAGNOSTICS v_linhas = ROW_COUNT;
+  IF v_linhas = 0 THEN
+    RAISE EXCEPTION 'Restaurante % não encontrado ao resetar a cota mensal.', p_restaurante_id;
+  END IF;
 END;
 $$;
 
@@ -348,14 +442,29 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
+DECLARE
+  v_linhas INT;
 BEGIN
-  IF current_setting('role') <> 'service_role' THEN
-    RAISE EXCEPTION 'Acesso negado.';
+  -- Mesma forma da 005 (ver comentário em consumir_creditos_ia).
+  IF current_setting('role', true) IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION 'Acesso negado: função administrativa';
+  END IF;
+
+  -- Sem este guard, p_qtd negativo transformaria a função de crédito numa
+  -- função de débito, e ainda poderia deixar o saldo avulso negativo.
+  IF p_qtd IS NULL OR p_qtd < 0 THEN
+    RAISE EXCEPTION 'Quantidade do pacote não pode ser negativa (recebido: %)', p_qtd;
   END IF;
 
   UPDATE restaurantes
   SET creditos_avulsos = creditos_avulsos + p_qtd
   WHERE id = p_restaurante_id;
+
+  -- Mesma razão de resetar_cota_mensal: dinheiro entrou, crédito não.
+  GET DIAGNOSTICS v_linhas = ROW_COUNT;
+  IF v_linhas = 0 THEN
+    RAISE EXCEPTION 'Restaurante % não encontrado ao creditar pacote avulso.', p_restaurante_id;
+  END IF;
 END;
 $$;
 
@@ -367,3 +476,14 @@ REVOKE EXECUTE ON FUNCTION creditar_pacote_avulso(UUID, INT)  FROM PUBLIC, anon,
 
 GRANT EXECUTE ON FUNCTION resetar_cota_mensal(UUID, INT)      TO service_role;
 GRANT EXECUTE ON FUNCTION creditar_pacote_avulso(UUID, INT)   TO service_role;
+
+-- Reafirmação para as duas RPCs recriadas acima. CREATE OR REPLACE
+-- preserva a ACL existente, então em teoria os GRANT/REVOKE da 005
+-- continuam valendo — mas isso deixaria esta migration dependente de a
+-- 005 ter sido aplicada antes. Repetindo aqui, a 006 fica autossuficiente
+-- e as RPCs de crédito nunca ficam expostas a anon/authenticated.
+REVOKE EXECUTE ON FUNCTION consumir_creditos_ia(UUID, INT, VARCHAR)         FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION reembolsar_creditos_ia(UUID, INT, VARCHAR, TEXT) FROM PUBLIC, anon, authenticated;
+
+GRANT  EXECUTE ON FUNCTION consumir_creditos_ia(UUID, INT, VARCHAR)          TO service_role;
+GRANT  EXECUTE ON FUNCTION reembolsar_creditos_ia(UUID, INT, VARCHAR, TEXT)  TO service_role;
