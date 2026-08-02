@@ -180,8 +180,23 @@ CREATE TABLE IF NOT EXISTS assinaturas (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- A função da trigger de modtime também é definida em schema.sql, mas um
+-- banco montado SÓ pelas migrations nunca roda o schema.sql — e aí o
+-- CREATE TRIGGER abaixo falharia com "function update_updated_at_column()
+-- does not exist", derrubando a migration inteira no meio. Recriar aqui,
+-- de forma idempotente, deixa a 006 autossuficiente. O corpo é idêntico
+-- ao do schema.sql, então CREATE OR REPLACE é um no-op num banco que já
+-- a tem.
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Trigger de modtime, no mesmo padrão de restaurantes e pedidos
--- (função update_updated_at_column(), definida em schema.sql). Sem ela
+-- (função update_updated_at_column(), definida acima e em schema.sql). Sem ela
 -- a coluna updated_at nunca se atualizaria sozinha e o código de
 -- billing precisaria escrevê-la à mão em todo caminho — o que hoje só
 -- acontece em alguns. DROP antes do CREATE porque CREATE TRIGGER não
