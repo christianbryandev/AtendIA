@@ -20,6 +20,8 @@ import { upsertCustomerInCRM, runReactivationCampaign } from './services/crm/rea
 import { importarCardapioiFood } from './services/ifood/ifood-api.js';
 import { decrypt } from './utils/crypto.js';
 import { validarPayloadCadastro } from './services/cadastro/criar-conta.js';
+import { autenticar } from './middleware/autenticar.js';
+import { criarSessaoAssinatura, criarSessaoPacote, criarSessaoPortal } from './services/billing/checkout.js';
 
 const app = express();
 
@@ -468,6 +470,46 @@ app.post('/api/auth/cadastro', async (req, res) => {
   );
 
   return res.status(201).json({ success: true, token, expiresIn: 43200 });
+});
+
+// ------------------------------------------------------------------
+// 3.3 COBRANÇA: CHECKOUT, PACOTES E PORTAL
+// ------------------------------------------------------------------
+app.post('/api/billing/checkout', autenticar, async (req, res) => {
+  try {
+    const { data: usuario } = await supabaseAdmin
+      .from('usuarios')
+      .select('email')
+      .eq('restaurante_id', req.restauranteId)
+      .limit(1)
+      .maybeSingle();
+
+    const url = await criarSessaoAssinatura(req.restauranteId!, usuario?.email || '');
+    return res.json({ success: true, url });
+  } catch (erro: any) {
+    console.error('[Billing] Falha ao criar checkout:', erro);
+    return res.status(400).json({ success: false, error: erro.message });
+  }
+});
+
+app.post('/api/billing/pacote', autenticar, async (req, res) => {
+  try {
+    const url = await criarSessaoPacote(req.restauranteId!, req.body?.pacoteId);
+    return res.json({ success: true, url });
+  } catch (erro: any) {
+    console.error('[Billing] Falha ao criar compra de pacote:', erro);
+    return res.status(400).json({ success: false, error: erro.message });
+  }
+});
+
+app.post('/api/billing/portal', autenticar, async (req, res) => {
+  try {
+    const url = await criarSessaoPortal(req.restauranteId!);
+    return res.json({ success: true, url });
+  } catch (erro: any) {
+    console.error('[Billing] Falha ao abrir o portal:', erro);
+    return res.status(400).json({ success: false, error: erro.message });
+  }
 });
 
 // ------------------------------------------------------------------
