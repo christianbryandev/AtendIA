@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "SaaS de Delivery, PDV e Automação de Vendas com IA no WhatsApp",
   "main": "dist/server.js",
+  "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",

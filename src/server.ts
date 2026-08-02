@@ -1,5 +1,6 @@
 import express from 'express';
 import crypto from 'crypto';
+import type { IncomingMessage } from 'http';
 
 declare global {
   namespace Express {
@@ -27,7 +28,10 @@ const app = express();
 
 app.use(cors());
 app.use(express.json({
-  verify: (req, res, buf) => {
+  // O callback de verify() do body-parser tipa `req` como IncomingMessage puro,
+  // não como express.Request — por isso a augmentação global acima não se
+  // aplica aqui. Estendemos o tipo localmente em vez de suprimir o erro.
+  verify: (req: IncomingMessage & { rawBody?: Buffer }, res, buf) => {
     req.rawBody = buf;
   }
 }));
@@ -128,6 +132,13 @@ app.post('/webhook/whatsapp', (req, res) => {
               console.error(`[Webhook] ERRO: Falha ao decifrar token do restaurante ${restauranteId}.`);
               return;
             }
+          }
+
+          // Sem token nem no .env nem no restaurante: configuração faltando.
+          // Falhar aqui com mensagem clara evita um TypeError mais adiante.
+          if (!metaToken) {
+            console.error(`[Webhook] ERRO: Nenhum token do WhatsApp configurado para o restaurante ${restauranteId}.`);
+            return;
           }
 
           // 2. CÁLCULO E CONSUMO DE CRÉDITOS (ANTES DE PROCESSAR)
