@@ -25,7 +25,7 @@ export default function Login() {
 
       if (response.ok && data.success) {
         localStorage.setItem('auth_token', data.token);
-        navigate('/dashboard');
+        navigate('/app/dashboard');
       } else {
         setError(data.error || 'E-mail ou senha incorretos.');
       }
