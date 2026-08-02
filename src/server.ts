@@ -23,6 +23,8 @@ import { decrypt } from './utils/crypto.js';
 import { validarPayloadCadastro } from './services/cadastro/criar-conta.js';
 import { autenticar } from './middleware/autenticar.js';
 import { criarSessaoAssinatura, criarSessaoPacote, criarSessaoPortal } from './services/billing/checkout.js';
+import { getStripe, getWebhookSecret } from './services/billing/stripe-client.js';
+import { processarEvento, registrarEventoSeNovo, removerRegistroEvento } from './services/billing/webhook-handler.js';
 
 const app = express();
 
@@ -521,6 +523,56 @@ app.post('/api/billing/portal', autenticar, async (req, res) => {
     console.error('[Billing] Falha ao abrir o portal:', erro);
     return res.status(400).json({ success: false, error: erro.message });
   }
+});
+
+// ------------------------------------------------------------------
+// 3.4 WEBHOOK DO STRIPE
+// ------------------------------------------------------------------
+app.post('/api/webhooks/stripe', async (req, res) => {
+  const assinaturaHeader = req.headers['stripe-signature'];
+
+  if (!assinaturaHeader || !req.rawBody) {
+    return res.status(400).send('Assinatura ausente.');
+  }
+
+  let evento;
+
+  try {
+    evento = getStripe().webhooks.constructEvent(
+      req.rawBody,
+      assinaturaHeader as string,
+      getWebhookSecret(),
+    );
+  } catch (erro: any) {
+    console.error('[Stripe] Assinatura inválida:', erro.message);
+    return res.status(400).send('Assinatura inválida.');
+  }
+
+  const ehNovo = await registrarEventoSeNovo(evento.id, evento.type);
+
+  if (!ehNovo) {
+    console.log(`[Stripe] Evento ${evento.id} já processado. Ignorando duplicata.`);
+    return res.status(200).json({ received: true });
+  }
+
+  // Responde antes de processar: o Stripe considera timeout acima de
+  // ~20s e reenvia. O processamento segue em segundo plano.
+  res.status(200).json({ received: true });
+
+  setImmediate(async () => {
+    try {
+      await processarEvento(evento);
+    } catch (erro) {
+      console.error(`[Stripe] Falha ao processar ${evento.id}:`, erro);
+
+      // O registro de idempotência só vale como "processado com
+      // sucesso". Sem desfazê-lo aqui, um reenvio do Stripe para este
+      // mesmo evento seria descartado como duplicata para sempre, e a
+      // falha (rede, banco fora do ar, etc.) viraria perda permanente
+      // e silenciosa de crédito para o lojista.
+      await removerRegistroEvento(evento.id);
+    }
+  });
 });
 
 // ------------------------------------------------------------------
