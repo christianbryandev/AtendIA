@@ -22,9 +22,11 @@ import { importarCardapioiFood } from './services/ifood/ifood-api.js';
 import { decrypt } from './utils/crypto.js';
 import { validarPayloadCadastro } from './services/cadastro/criar-conta.js';
 import { autenticar } from './middleware/autenticar.js';
+import { exigirAssinaturaAtiva } from './middleware/exigir-assinatura.js';
 import { criarSessaoAssinatura, criarSessaoPacote, criarSessaoPortal } from './services/billing/checkout.js';
 import { getStripe, getWebhookSecret } from './services/billing/stripe-client.js';
-import { processarEvento, registrarEventoSeNovo, removerRegistroEvento } from './services/billing/webhook-handler.js';
+import { processarEvento, registrarEventoSeNovo, removerRegistroEvento, CREDITOS_DA_COTA } from './services/billing/webhook-handler.js';
+import { reconciliarSePreciso } from './services/billing/status.js';
 
 const app = express();
 
@@ -525,6 +527,41 @@ app.post('/api/billing/portal', autenticar, async (req, res) => {
   }
 });
 
+// Status da assinatura + saldo de créditos, consumido pelo painel para
+// decidir o que mostrar e (na trava) para explicar por que foi barrado.
+app.get('/api/billing/status', autenticar, async (req, res) => {
+  const { data: assinatura } = await supabaseAdmin
+    .from('assinaturas')
+    .select('status, periodo_fim, created_at')
+    .eq('restaurante_id', req.restauranteId)
+    .maybeSingle();
+
+  if (!assinatura) {
+    return res.status(404).json({ success: false, error: 'Conta sem assinatura.' });
+  }
+
+  const status = await reconciliarSePreciso(
+    req.restauranteId!,
+    assinatura.created_at,
+    assinatura.status,
+  );
+
+  const { data: saldo } = await supabaseAdmin
+    .from('restaurantes')
+    .select('creditos_cota, creditos_avulsos')
+    .eq('id', req.restauranteId)
+    .single();
+
+  return res.json({
+    success: true,
+    status,
+    periodoFim: assinatura.periodo_fim,
+    creditosCota: saldo?.creditos_cota ?? 0,
+    creditosAvulsos: saldo?.creditos_avulsos ?? 0,
+    cotaTotal: CREDITOS_DA_COTA,
+  });
+});
+
 // ------------------------------------------------------------------
 // 3.4 WEBHOOK DO STRIPE
 // ------------------------------------------------------------------
@@ -578,17 +615,9 @@ app.post('/api/webhooks/stripe', async (req, res) => {
 // ------------------------------------------------------------------
 // 4. ROTAS DE DASHBOARD E MÉTRICAS
 // ------------------------------------------------------------------
-app.get('/api/dashboard/metricas', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token não fornecido' });
-  }
-  const token = authHeader.split(' ')[1];
-
+app.get('/api/dashboard/metricas', autenticar, exigirAssinaturaAtiva, async (req, res) => {
   try {
-    const jwtSecret = getJwtSecret();
-    const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
-    const restauranteId = decoded.sub;
+    const restauranteId = req.restauranteId;
 
     if (!restauranteId) {
       return res.status(400).json({ error: 'ID do restaurante ausente no token' });
@@ -666,12 +695,8 @@ app.get('/api/dashboard/metricas', async (req, res) => {
 // ------------------------------------------------------------------
 
 // Lista contatos do CRM
-app.get('/api/crm/clientes', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token não fornecido' });
-  }
-  const token = authHeader.split(' ')[1];
+app.get('/api/crm/clientes', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  const token = req.headers.authorization!.split(' ')[1];
   const tenantClient = getTenantSupabaseClient(token);
 
   const { data: clientes, error } = await tenantClient
@@ -684,19 +709,10 @@ app.get('/api/crm/clientes', async (req, res) => {
 });
 
 // Disparo de campanha de reativação de clientes ausentes
-app.post('/api/crm/reativacao', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token não fornecido' });
-  }
-  const token = authHeader.split(' ')[1];
-  
+app.post('/api/crm/reativacao', autenticar, exigirAssinaturaAtiva, async (req, res) => {
   try {
-    const jwtSecret = getJwtSecret();
-    const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
-    
     // O ID seguro do restaurante vem do Token validado, não do body da requisição
-    const restauranteIdSeguro = decoded.sub;
+    const restauranteIdSeguro = req.restauranteId;
     const { diasAusente } = req.body;
 
     if (!restauranteIdSeguro) {
@@ -711,17 +727,9 @@ app.post('/api/crm/reativacao', async (req, res) => {
 });
 
 // Atualização Manual de Estágio do Kanban (Override Manual)
-app.put('/api/crm/estagio', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token não fornecido' });
-  }
-  const token = authHeader.split(' ')[1];
-  
+app.put('/api/crm/estagio', autenticar, exigirAssinaturaAtiva, async (req, res) => {
   try {
-    const jwtSecret = getJwtSecret();
-    const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
-    const restauranteId = decoded.sub;
+    const restauranteId = req.restauranteId;
 
     const { clienteId, novoEstagio, problemaAtivo } = req.body;
 
@@ -796,18 +804,9 @@ app.post('/api/cron/verificar-inatividade', async (req, res) => {
 // ------------------------------------------------------------------
 // 4.1 INTEGRAÇÃO iFOOD
 // ------------------------------------------------------------------
-app.post('/api/ifood/sync', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token não fornecido' });
-  }
-  const token = authHeader.split(' ')[1];
-  
+app.post('/api/ifood/sync', autenticar, exigirAssinaturaAtiva, async (req, res) => {
   try {
-    const jwtSecret = getJwtSecret();
-    const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
-    
-    const restauranteIdSeguro = decoded.sub;
+    const restauranteIdSeguro = req.restauranteId;
 
     if (!restauranteIdSeguro) {
       return res.status(400).json({ error: 'ID do restaurante ausente no token' });
@@ -824,12 +823,8 @@ app.post('/api/ifood/sync', async (req, res) => {
 // 5. ROTAS DO PDV (FRENTE DE CAIXA & COZINHA)
 // ------------------------------------------------------------------
 
-app.get('/api/pdv/pedidos', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token não fornecido' });
-  }
-  const token = authHeader.split(' ')[1];
+app.get('/api/pdv/pedidos', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  const token = req.headers.authorization!.split(' ')[1];
   const tenantClient = getTenantSupabaseClient(token);
 
   const { data: pedidos, error } = await tenantClient
@@ -842,17 +837,9 @@ app.get('/api/pdv/pedidos', async (req, res) => {
 });
 
 // Atualiza o Status do Pedido (Gatilhos 2 e 3 do CRM Kanban)
-app.put('/api/pdv/pedidos/:id/status', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token não fornecido' });
-  }
-  const token = authHeader.split(' ')[1];
-  
+app.put('/api/pdv/pedidos/:id/status', autenticar, exigirAssinaturaAtiva, async (req, res) => {
   try {
-    const jwtSecret = getJwtSecret();
-    const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
-    const restauranteId = decoded.sub;
+    const restauranteId = req.restauranteId;
 
     const pedidoId = req.params.id;
     const { status } = req.body;
