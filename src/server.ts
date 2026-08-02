@@ -128,7 +128,10 @@ app.post('/webhook/whatsapp', (req, res) => {
           }
 
           // 2. CÁLCULO E CONSUMO DE CRÉDITOS (ANTES DE PROCESSAR)
-          const custoCreditos = messageType === 'audio' ? 3 : 1;
+          // 8 para áudio, alinhado com o que a landing vende. O número reflete o
+          // custo real de STT + LLM + TTS; o TTS ainda não está ligado (ciclo 3),
+          // mas a cota já é dimensionada para ele.
+          const custoCreditos = messageType === 'audio' ? 8 : 1;
           const { data: creditosAprovados, error: erroCreditos } = await supabaseAdmin
             .rpc('consumir_creditos_ia', {
               p_restaurante_id: restauranteId,
