@@ -1,7 +1,8 @@
 import type Stripe from 'stripe';
 import { supabaseAdmin } from '../../config/supabase.js';
-import { atualizarStatus, buscarPorCustomerId } from './assinatura-repo.js';
+import { atualizarStatus, buscarAssinatura, buscarPorCustomerId } from './assinatura-repo.js';
 import { pacotePorId } from './pacotes.js';
+import { getStripe } from './stripe-client.js';
 
 export const CREDITOS_DA_COTA = 10000;
 
@@ -157,6 +158,51 @@ export async function processarEvento(evento: Stripe.Event): Promise<void> {
     }
 
     case 'charge.refunded': {
+      // O evento charge.refunded dispara para QUALQUER reembolso da
+      // cobrança, inclusive um reembolso parcial (ex.: cortesia de
+      // R$ 50 por um problema pontual). Só um reembolso TOTAL significa
+      // "cliente saiu" — comparar amount_refunded com amount é a única
+      // forma de diferenciar os dois casos. Se isso for removido, um
+      // gesto de boa vontade parcial derruba o atendimento inteiro do
+      // restaurante.
+      const reembolsoTotal = (objeto.amount_refunded ?? 0) >= (objeto.amount ?? 0);
+
+      if (!reembolsoTotal) {
+        console.log(
+          `[Stripe] Reembolso parcial no evento ${evento.id} para o restaurante ${restauranteId} ` +
+          `(amount_refunded=${objeto.amount_refunded}, amount=${objeto.amount}): status e cota nao alterados.`,
+        );
+        return;
+      }
+
+      // Reembolsar no Stripe NÃO cancela a assinatura: o objeto
+      // subscription continua vivo e cobra de novo no mês seguinte. Sem
+      // cancelar aqui, o status "reembolsada" mentiria para a trava de
+      // checkout.ts, que assume que ninguém reembolsado tem assinatura
+      // ativa no Stripe.
+      const assinatura = await buscarAssinatura(restauranteId);
+      const subscriptionId = assinatura?.stripeSubscriptionId;
+
+      if (subscriptionId) {
+        try {
+          await getStripe().subscriptions.cancel(subscriptionId);
+        } catch (erro) {
+          // O Stripe devolve erro quando a assinatura já está
+          // cancelada. Isso NÃO é uma falha: significa que o estado
+          // desejado (sem assinatura viva) já vale. Não deve abortar o
+          // processamento do evento.
+          console.log(
+            `[Stripe] Nao foi possivel cancelar a assinatura ${subscriptionId} no reembolso do evento ` +
+            `${evento.id} (provavelmente ja estava cancelada): ${(erro as Error).message}`,
+          );
+        }
+      } else {
+        console.log(
+          `[Stripe] Evento ${evento.id}: reembolso total sem stripe_subscription_id salvo para o ` +
+          `restaurante ${restauranteId}; seguindo apenas com a marcacao de status.`,
+        );
+      }
+
       await atualizarStatus(restauranteId, {
         status: 'reembolsada',
         canceladaEm: new Date().toISOString(),

@@ -28,6 +28,12 @@ export async function criarSessaoAssinatura(restauranteId: string, email: string
 
   // O Stripe aceita duas assinaturas do mesmo preço para o mesmo
   // Customer sem reclamar. A trava contra cobrança dupla é esta.
+  //
+  // 'cancelada' e 'reembolsada' passam por aqui de propósito: nos dois
+  // casos não existe assinatura viva no Stripe (customer.subscription.deleted
+  // marca a primeira; o webhook de charge.refunded cancela a assinatura
+  // antes de marcar a segunda), então barrar o checkout impediria um
+  // ex-cliente de assinar de novo sem motivo.
   if (assinatura?.status === 'ativa') {
     throw new Error('Esta conta já tem uma assinatura ativa.');
   }

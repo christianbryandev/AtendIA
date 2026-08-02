@@ -2,10 +2,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const atualizarStatusMock = vi.fn();
 const buscarPorCustomerIdMock = vi.fn();
+const buscarAssinaturaMock = vi.fn();
 
 vi.mock('./assinatura-repo.js', () => ({
   atualizarStatus: (...a: unknown[]) => atualizarStatusMock(...a),
   buscarPorCustomerId: (...a: unknown[]) => buscarPorCustomerIdMock(...a),
+  buscarAssinatura: (...a: unknown[]) => buscarAssinaturaMock(...a),
+}));
+
+const subscriptionsCancelMock = vi.fn();
+
+vi.mock('./stripe-client.js', () => ({
+  getStripe: () => ({
+    subscriptions: { cancel: (...a: unknown[]) => subscriptionsCancelMock(...a) },
+  }),
 }));
 
 const rpcMock = vi.fn();
@@ -30,6 +40,8 @@ beforeEach(() => {
   insertMock.mockResolvedValue({ error: null });
   eqAposDeleteMock.mockResolvedValue({ error: null });
   buscarPorCustomerIdMock.mockResolvedValue({ restauranteId: 'rest-1' });
+  buscarAssinaturaMock.mockResolvedValue({ restauranteId: 'rest-1', stripeSubscriptionId: 'sub_1' });
+  subscriptionsCancelMock.mockResolvedValue({});
 });
 
 describe('registrarEventoSeNovo', () => {
@@ -182,13 +194,54 @@ describe('customer.subscription.deleted', () => {
 });
 
 describe('charge.refunded', () => {
-  it('marca reembolsada e zera a cota', async () => {
+  it('reembolso parcial nao altera status nem cota', async () => {
     await processarEvento({
-      id: 'evt_7',
+      id: 'evt_7a',
       type: 'charge.refunded',
-      data: { object: { customer: 'cus_1' } },
+      data: { object: { customer: 'cus_1', amount: 17999, amount_refunded: 5000 } },
     } as any);
 
+    expect(atualizarStatusMock).not.toHaveBeenCalled();
+    expect(rpcMock).not.toHaveBeenCalled();
+    expect(subscriptionsCancelMock).not.toHaveBeenCalled();
+  });
+
+  it('reembolso total cancela a assinatura no Stripe, marca reembolsada e zera a cota', async () => {
+    await processarEvento({
+      id: 'evt_7b',
+      type: 'charge.refunded',
+      data: { object: { customer: 'cus_1', amount: 17999, amount_refunded: 17999 } },
+    } as any);
+
+    expect(subscriptionsCancelMock).toHaveBeenCalledWith('sub_1');
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({ status: 'reembolsada' }));
+    expect(rpcMock).toHaveBeenCalledWith('resetar_cota_mensal', { p_restaurante_id: 'rest-1', p_qtd: 0 });
+  });
+
+  it('reembolso total quando a assinatura ja esta cancelada no Stripe nao impede a marcacao do status', async () => {
+    subscriptionsCancelMock.mockRejectedValue(new Error('No such subscription'));
+
+    await processarEvento({
+      id: 'evt_7c',
+      type: 'charge.refunded',
+      data: { object: { customer: 'cus_1', amount: 17999, amount_refunded: 17999 } },
+    } as any);
+
+    expect(subscriptionsCancelMock).toHaveBeenCalledWith('sub_1');
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({ status: 'reembolsada' }));
+    expect(rpcMock).toHaveBeenCalledWith('resetar_cota_mensal', { p_restaurante_id: 'rest-1', p_qtd: 0 });
+  });
+
+  it('reembolso total sem stripe_subscription_id salvo ainda marca reembolsada e zera a cota', async () => {
+    buscarAssinaturaMock.mockResolvedValue({ restauranteId: 'rest-1', stripeSubscriptionId: null });
+
+    await processarEvento({
+      id: 'evt_7d',
+      type: 'charge.refunded',
+      data: { object: { customer: 'cus_1', amount: 17999, amount_refunded: 17999 } },
+    } as any);
+
+    expect(subscriptionsCancelMock).not.toHaveBeenCalled();
     expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({ status: 'reembolsada' }));
     expect(rpcMock).toHaveBeenCalledWith('resetar_cota_mensal', { p_restaurante_id: 'rest-1', p_qtd: 0 });
   });
