@@ -14,7 +14,7 @@ export default function Preco() {
     <Section id="preco" tone="muted">
       <div className="mx-auto max-w-2xl text-center">
         <h2 className="text-3xl font-bold tracking-tight text-ink-800 sm:text-4xl">
-          Um plano, sem pegadinha
+          Um preço, sem surpresa no fim do mês
         </h2>
         <p className="mt-4 text-ink-600">
           Tudo incluído. Sem taxa de instalação, sem fidelidade.

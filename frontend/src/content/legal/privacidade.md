@@ -13,7 +13,7 @@ sob o nº **67.146.802/0001-85**, com sede em Ribeirão Preto, São Paulo.
 Nesta política, "nós", "AtendIA" ou "a plataforma" se referem a essa empresa.
 
 **Encarregado pelo Tratamento de Dados Pessoais (LGPD, Art. 41):**
-Christian Bryan Pereira — christianpereira.mtx@gmail.com
+Christian Bryan Pereira — contato@atendiarp.com.br
 
 ## 2. O que esta política cobre
 
@@ -129,7 +129,7 @@ Você pode, a qualquer momento:
 - **Revogar consentimento**, quando o tratamento se basear nele
 - **Opor-se** a tratamento feito com base em legítimo interesse
 
-**Como exercer:** escreva para christianpereira.mtx@gmail.com. Respondemos em até
+**Como exercer:** escreva para contato@atendiarp.com.br. Respondemos em até
 **15 dias**.
 
 Se você for cliente de um restaurante, encaminharemos seu pedido ao restaurante
@@ -193,4 +193,4 @@ topo indica a última revisão.
 
 **67.146.802 CHRISTIAN BRYAN PEREIRA**
 CNPJ 67.146.802/0001-85 — Ribeirão Preto/SP
-christianpereira.mtx@gmail.com
+contato@atendiarp.com.br

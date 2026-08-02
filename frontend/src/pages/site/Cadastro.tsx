@@ -13,7 +13,7 @@ export default function Cadastro() {
         a gente — respondemos pessoalmente.
       </p>
       <div className="mt-8 flex flex-wrap justify-center gap-3">
-        <Button href="mailto:christianpereira.mtx@gmail.com">
+        <Button href="mailto:contato@atendiarp.com.br">
           Quero ser avisado
         </Button>
         <Button to="/" variant="secondary">Voltar ao início</Button>

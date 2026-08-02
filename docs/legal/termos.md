@@ -231,4 +231,4 @@ demandar no foro de seu domicílio, nos termos do Código de Defesa do Consumido
 
 **67.146.802 CHRISTIAN BRYAN PEREIRA**
 CNPJ 67.146.802/0001-85 — Ribeirão Preto/SP
-christianpereira.mtx@gmail.com
+contato@atendiarp.com.br

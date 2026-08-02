@@ -39,7 +39,7 @@ do restaurante**.
 
 ## Como pedir
 
-Envie uma mensagem para **christianpereira.mtx@gmail.com** com o assunto
+Envie uma mensagem para **contato@atendiarp.com.br** com o assunto
 **"Exclusão de dados"**, informando:
 
 - O **e-mail cadastrado** (se você é assinante), ou
@@ -125,7 +125,7 @@ Você também pode reclamar à **ANPD** (Autoridade Nacional de Proteção de Da
 ## Contato
 
 **Encarregado pelo Tratamento de Dados Pessoais**
-Christian Bryan Pereira — christianpereira.mtx@gmail.com
+Christian Bryan Pereira — contato@atendiarp.com.br
 
 **67.146.802 CHRISTIAN BRYAN PEREIRA**
 CNPJ 67.146.802/0001-85 — Ribeirão Preto/SP

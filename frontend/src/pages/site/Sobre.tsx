@@ -34,8 +34,8 @@ export default function Sobre() {
           <p>CNPJ 67.146.802/0001-85</p>
           <p>Ribeirão Preto — São Paulo</p>
           <p className="mt-3">
-            <a href="mailto:christianpereira.mtx@gmail.com" className="font-medium text-brand-700">
-              christianpereira.mtx@gmail.com
+            <a href="mailto:contato@atendiarp.com.br" className="font-medium text-brand-700">
+              contato@atendiarp.com.br
             </a>
           </p>
         </div>

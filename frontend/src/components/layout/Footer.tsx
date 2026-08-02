@@ -7,7 +7,7 @@ const GRUPOS = [
     titulo: 'Produto',
     links: [
       { rotulo: 'Recursos', href: '/#recursos' },
-      { rotulo: 'Preço', href: '/#preco' },
+      { rotulo: 'Planos', href: '/#preco' },
       { rotulo: 'Perguntas', href: '/#perguntas' },
     ],
   },
