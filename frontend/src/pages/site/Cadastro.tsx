@@ -1,41 +1,111 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Container from '../../components/ui/Container';
 import { API_URL } from '../../services/api';
 import { validarCnpj, formatarCnpj, normalizarCnpj } from '../../utils/cnpj';
-import { buscarCep } from '../../services/viacep';
+import { buscarCep, type EnderecoCep } from '../../services/viacep';
 
 const CAMPOS_INICIAIS = {
   nome: '', email: '', senha: '', restauranteNome: '', cnpj: '',
   cep: '', logradouro: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '',
 };
 
+const CAMPOS_ENDERECO = ['logradouro', 'bairro', 'cidade', 'uf'] as const;
+
 const rotuloClasse = 'mb-1.5 block text-xs font-bold uppercase tracking-wider text-ink-600';
 const campoClasse =
   'w-full rounded-lg border border-stone-300 bg-white p-3 text-sm text-ink-800 ' +
   'focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600';
 
+function normalizarParaComparacao(valor: string): string {
+  return valor.trim().toLowerCase();
+}
+
+// Um campo "diverge" quando o lojista já digitou algo nele e o ViaCEP
+// trouxe um valor diferente. Campo vazio nunca diverge: só é preenchido.
+function enderecoDivergeDoDigitado(endereco: EnderecoCep, atual: typeof CAMPOS_INICIAIS): boolean {
+  return CAMPOS_ENDERECO.some((chave) => {
+    const digitado = atual[chave];
+    const doCep = endereco[chave];
+    return (
+      digitado.trim() !== '' &&
+      doCep.trim() !== '' &&
+      normalizarParaComparacao(digitado) !== normalizarParaComparacao(doCep)
+    );
+  });
+}
+
+// Preenche só os campos de endereço que ainda estão vazios, sem nunca
+// sobrescrever o que o lojista já digitou.
+function mesclarComEnderecoDoCep(atual: typeof CAMPOS_INICIAIS, endereco: EnderecoCep): typeof CAMPOS_INICIAIS {
+  return {
+    ...atual,
+    logradouro: atual.logradouro || endereco.logradouro,
+    bairro: atual.bairro || endereco.bairro,
+    cidade: atual.cidade || endereco.cidade,
+    uf: atual.uf || endereco.uf,
+  };
+}
+
 export default function Cadastro() {
   const [campos, setCampos] = useState(CAMPOS_INICIAIS);
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  const [enderecoCepDivergente, setEnderecoCepDivergente] = useState<EnderecoCep | null>(null);
   const navigate = useNavigate();
 
-  const atualizar = (chave: keyof typeof CAMPOS_INICIAIS, valor: string) =>
+  const cnpjRef = useRef<HTMLInputElement>(null);
+  const cnpjDigitosAntesDoCursor = useRef<number | null>(null);
+
+  const atualizar = (chave: keyof typeof CAMPOS_INICIAIS, valor: string) => {
     setCampos((atual) => ({ ...atual, [chave]: valor }));
+    if (chave === 'cep') setEnderecoCepDivergente(null);
+  };
 
   const completarPeloCep = async () => {
     const endereco = await buscarCep(campos.cep);
     if (!endereco) return;
 
+    setEnderecoCepDivergente(enderecoDivergeDoDigitado(endereco, campos) ? endereco : null);
+    setCampos((atual) => mesclarComEnderecoDoCep(atual, endereco));
+  };
+
+  const usarEnderecoDoCep = () => {
+    if (!enderecoCepDivergente) return;
+    const endereco = enderecoCepDivergente;
     setCampos((atual) => ({
       ...atual,
-      logradouro: endereco.logradouro || atual.logradouro,
-      bairro: endereco.bairro || atual.bairro,
-      cidade: endereco.cidade || atual.cidade,
-      uf: endereco.uf || atual.uf,
+      logradouro: endereco.logradouro,
+      bairro: endereco.bairro,
+      cidade: endereco.cidade,
+      uf: endereco.uf,
     }));
+    setEnderecoCepDivergente(null);
   };
+
+  const alterarCnpj = (evento: React.ChangeEvent<HTMLInputElement>) => {
+    const valorNovo = evento.target.value;
+    const posicaoCursor = evento.target.selectionStart ?? valorNovo.length;
+    cnpjDigitosAntesDoCursor.current = valorNovo.slice(0, posicaoCursor).replace(/\D/g, '').length;
+    atualizar('cnpj', valorNovo);
+  };
+
+  // Depois de reformatar o CNPJ, o cursor volta para a posição equivalente
+  // em número de dígitos, em vez de pular para o fim do campo.
+  useLayoutEffect(() => {
+    const digitosAntes = cnpjDigitosAntesDoCursor.current;
+    if (digitosAntes === null || !cnpjRef.current) return;
+    cnpjDigitosAntesDoCursor.current = null;
+
+    const formatado = formatarCnpj(campos.cnpj);
+    let digitosContados = 0;
+    let posicao = 0;
+    while (posicao < formatado.length && digitosContados < digitosAntes) {
+      if (/\d/.test(formatado[posicao])) digitosContados += 1;
+      posicao += 1;
+    }
+    cnpjRef.current.setSelectionRange(posicao, posicao);
+  }, [campos.cnpj]);
 
   const enviar = async (evento: React.FormEvent) => {
     evento.preventDefault();
@@ -115,8 +185,9 @@ export default function Cadastro() {
             <div>
               <label className={rotuloClasse} htmlFor="senha">Senha</label>
               <input id="senha" type="password" className={campoClasse} required minLength={8}
+                aria-describedby="senha-ajuda"
                 value={campos.senha} onChange={(e) => atualizar('senha', e.target.value)} />
-              <p className="mt-1 text-xs text-stone-500">Ao menos 8 caracteres.</p>
+              <p id="senha-ajuda" className="mt-1 text-xs text-stone-500">Ao menos 8 caracteres.</p>
             </div>
           </fieldset>
 
@@ -133,9 +204,9 @@ export default function Cadastro() {
 
             <div>
               <label className={rotuloClasse} htmlFor="cnpj">CNPJ</label>
-              <input id="cnpj" className={campoClasse} required inputMode="numeric"
+              <input id="cnpj" ref={cnpjRef} className={campoClasse} required inputMode="numeric"
                 value={formatarCnpj(campos.cnpj)}
-                onChange={(e) => atualizar('cnpj', e.target.value)} />
+                onChange={alterarCnpj} />
             </div>
           </fieldset>
 
@@ -151,8 +222,18 @@ export default function Cadastro() {
               <div>
                 <label className={rotuloClasse} htmlFor="cep">CEP</label>
                 <input id="cep" className={campoClasse} required inputMode="numeric"
+                  aria-describedby={enderecoCepDivergente ? 'cep-aviso' : undefined}
                   value={campos.cep} onBlur={completarPeloCep}
                   onChange={(e) => atualizar('cep', e.target.value)} />
+                {enderecoCepDivergente && (
+                  <p id="cep-aviso" role="status" className="mt-1.5 text-xs text-amber-700">
+                    O endereço deste CEP é outro.{' '}
+                    <button type="button" onClick={usarEnderecoDoCep}
+                      className="font-semibold underline hover:text-amber-800">
+                      Usar o endereço deste CEP
+                    </button>
+                  </p>
+                )}
               </div>
 
               <div className="sm:col-span-2">
