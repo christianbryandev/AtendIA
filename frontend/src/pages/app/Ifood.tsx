@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { apiFetch } from '../services/api';
+import { apiFetch } from '../../services/api';
 
 export default function Ifood() {
   const [isSyncing, setIsSyncing] = useState(false);

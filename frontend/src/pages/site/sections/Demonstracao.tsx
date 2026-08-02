@@ -1,0 +1,91 @@
+import Section from '../../../components/ui/Section';
+import ConversaDemo from './ConversaDemo';
+
+// Diferente da conversa do Hero (cliente recorrente que ja sabe o pedido):
+// aqui e um cliente novo e indeciso, que pergunta antes de decidir — o caso
+// que mais consome mensagens (e creditos) de atendimento.
+const CONVERSA_INDECISA = [
+  { de: 'cliente' as const, texto: 'Oi! Vocês têm pizza sem glúten?' },
+  { de: 'ia' as const, texto: 'Temos sim! A Margherita sem glúten sai R$ 54,90 no tamanho médio.' },
+  { de: 'cliente' as const, texto: 'E a de frango com catupiry, quanto fica no tamanho grande?' },
+  { de: 'ia' as const, texto: 'A Frango com Catupiry grande fica R$ 68,90. Quer que eu já monte o pedido?' },
+  { de: 'cliente' as const, texto: 'Pode ser essa, mas sem cebola, por favor' },
+  {
+    de: 'ia' as const,
+    texto: 'Fechado! 1 Pizza Grande Frango com Catupiry, sem cebola. Com a entrega de R$ 6,00 fica R$ 74,90. Confirma?',
+  },
+  { de: 'cliente' as const, texto: 'Confirmo!' },
+];
+
+const PEDIDO = {
+  numero: '#1043',
+  cliente: 'Rafael M.',
+  itens: [{ qtd: 1, nome: 'Pizza Grande Frango c/ Catupiry (sem cebola)', valor: 'R$ 68,90' }],
+  taxa: 'R$ 6,00',
+  total: 'R$ 74,90',
+  pagamento: 'Pix',
+};
+
+export default function Demonstracao() {
+  return (
+    <Section id="demonstracao">
+      <div className="mx-auto max-w-2xl text-center">
+        <h2 className="text-3xl font-bold tracking-tight text-ink-800 sm:text-4xl">
+          O cliente conversa. Você recebe o pedido pronto.
+        </h2>
+        <p className="mt-4 text-ink-600">
+          Enquanto a conversa acontece no WhatsApp, o pedido se monta sozinho no
+          seu painel.
+        </p>
+      </div>
+
+      <div className="mt-14 grid items-start gap-8 lg:grid-cols-2">
+        <ConversaDemo
+          nomeLoja="Pizzaria do Bairro"
+          avatarLetra="P"
+          mensagens={CONVERSA_INDECISA}
+        />
+
+        <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between border-b border-stone-200 pb-3">
+            <p className="font-semibold text-ink-800">Pedido {PEDIDO.numero}</p>
+            <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-brand-700">
+              Novo
+            </span>
+          </div>
+
+          <dl className="mt-4 space-y-3 text-sm">
+            <div className="flex justify-between">
+              <dt className="text-ink-600">Cliente</dt>
+              <dd className="font-medium text-ink-800">{PEDIDO.cliente}</dd>
+            </div>
+            {PEDIDO.itens.map((item) => (
+              <div key={item.nome} className="flex justify-between">
+                <dt className="text-ink-600">{item.qtd}× {item.nome}</dt>
+                <dd className="font-medium text-ink-800">{item.valor}</dd>
+              </div>
+            ))}
+            <div className="flex justify-between">
+              <dt className="text-ink-600">Taxa de entrega</dt>
+              <dd className="font-medium text-ink-800">{PEDIDO.taxa}</dd>
+            </div>
+            <div className="flex justify-between border-t border-stone-200 pt-3">
+              <dt className="font-semibold text-ink-800">Total</dt>
+              <dd className="font-bold text-ink-800">{PEDIDO.total}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="sr-only">Forma de pagamento</dt>
+              <dd className="w-full rounded-lg bg-stone-50 px-3 py-2.5 text-xs text-ink-600">
+                {PEDIDO.pagamento}
+              </dd>
+            </div>
+          </dl>
+
+          <p className="mt-4 border-t border-stone-200 pt-3 text-center text-xs text-stone-500">
+            Exemplo ilustrativo do painel
+          </p>
+        </div>
+      </div>
+    </Section>
+  );
+}

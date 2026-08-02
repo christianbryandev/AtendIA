@@ -3,10 +3,6 @@
 **Última atualização:** 1º de agosto de 2026
 **Versão:** 1.0
 
-> ⚠️ **MINUTA — não validada juridicamente.** As cláusulas de limitação de
-> responsabilidade, rescisão e foro têm implicações que esta redação não
-> garante. Recomenda-se revisão por advogado.
-
 ---
 
 ## 1. Quem contrata e quem presta

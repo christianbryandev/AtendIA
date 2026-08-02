@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { apiFetch } from '../services/api';
+import { apiFetch } from '../../services/api';
 
 type EstagioPipeline = 'novo_contato' | 'pedido_em_andamento' | 'cliente_ativo' | 'vip_recorrente' | 'em_risco';
 

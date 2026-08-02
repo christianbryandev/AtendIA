@@ -382,11 +382,56 @@ Quando a cobrança for implementada (ciclo 2), usar o componente do próprio
 gateway, que coleta o cartão no navegador e devolve um token. Mantém o projeto
 fora do escopo pesado do PCI-DSS.
 
-### Nenhuma abstração de pagamento agora
+### Gateway escolhido: Stripe
 
-Criar camada de pagamento antes de escolher o gateway produz a abstração errada.
-Mercado Pago, Stripe e Asaas têm fluxos distintos. A integração entra no ciclo 2,
-sob medida.
+Decisão do Christian em 2026-08-01. Isso desbloqueia o desenho do ciclo 2.
+
+A integração continua não fazendo parte desta entrega. Quando entrar: usar o
+componente do próprio Stripe, que coleta o cartão no navegador e devolve um
+token — dados de cartão nunca passam pelo servidor.
+
+⚠️ O Stripe cobra em BRL no Brasil mas exige entidade brasileira habilitada;
+confirmar que a conta MEI atende aos requisitos antes de construir em cima.
+
+---
+
+## 9. Gate de lançamento — a landing NÃO pode ir ao ar antes disto
+
+A página anuncia funcionalidades que **ainda não existem**. Isso foi uma decisão
+consciente (2026-08-01): o Christian vai implementar todas antes de publicar, e
+não divulga o produto até estar funcionando.
+
+O risco que este gate existe para conter: se a página subir antes, cada linha
+abaixo vira publicidade enganosa (CDC, Art. 37) com o CNPJ de pessoa física no
+rodapé. E, no caso dos Termos, **promessa contratual vigente a partir do
+primeiro cliente**.
+
+| Promessa | Onde aparece | Ciclo que entrega |
+|---|---|---|
+| Pagamento por PIX | `Recursos.tsx` | 5 |
+| Controle de caixa (abertura/fechamento) | `Recursos.tsx` | 3 |
+| Cancelar a assinatura pelo painel | `Faq.tsx` + Termos §5 | 2 |
+| Comprar pacotes avulsos de crédito no painel | `Preco.tsx` + Termos §3.2 | 2 |
+| Aviso no painel ao se aproximar do limite de cota | `Faq.tsx` + Termos §3.3 | 2 |
+| Exportar os dados a qualquer momento | Termos §11 | 3 |
+| Excluir a conta pelo painel (Opção A) | removida da página de exclusão | 3 |
+| Importação de cardápio do iFood | `Recursos.tsx`, `ComoFunciona.tsx` | 4 |
+| Demonstração do painel fiel ao produto real | `Demonstracao.tsx` | 3 |
+
+**Critério de coerência que este projeto adotou:** a "Opção A" da página de
+exclusão foi removida, com teste de guarda, por descrever um botão inexistente.
+As demais promessas acima ficam **por decisão explícita**, não por descuido —
+mas se o lançamento for antecipado sem que elas existam, a decisão correta é
+removê-las da página, e não publicar assim mesmo.
+
+### Também obrigatório antes de publicar
+
+- Trocar `christianpereira.mtx@gmail.com` por `privacidade@<domínio>` — aparece
+  hoje em 6 pontos públicos (3 documentos legais, `/sobre`, `/cadastro`, e como
+  Encarregado de Dados)
+- Implementar no backend a razão de 8 créditos por áudio e o medidor de
+  disparos: sem isso a página anuncia cobrança que o sistema não aplica
+  (ver seção 3)
 
 ---
 
