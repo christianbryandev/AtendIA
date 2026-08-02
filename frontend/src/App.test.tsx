@@ -16,9 +16,11 @@ describe('Roteamento', () => {
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
   });
 
-  it('/cadastro mostra o placeholder, sem prometer o que nao existe', async () => {
+  it('/cadastro mostra o formulario real de criacao de conta', async () => {
     renderEm('/cadastro');
-    expect(await screen.findByText(/finalizando os últimos ajustes/i)).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: /criar conta/i })
+    ).toBeInTheDocument();
   });
 
   it('/sobre existe', async () => {
