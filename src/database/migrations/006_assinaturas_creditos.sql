@@ -11,6 +11,16 @@
 -- mesma assinatura da 005. Mudar a assinatura criaria uma função
 -- nova, e os REVOKE/GRANT da 005 não se aplicariam a ela — o buraco
 -- de segurança fechado lá reabriria em silêncio.
+--
+-- ⚠️ src/database/schema.sql (linha ~155) já define uma tabela
+-- `assinaturas` órfã, com formato incompatível com a desta migration
+-- (sem stripe_customer_id, stripe_subscription_id, periodo_fim, sem
+-- UNIQUE em restaurante_id, sem CHECK de status). Nenhum código
+-- TypeScript a referencia, mas se schema.sql já foi aplicado direto
+-- no Supabase em algum momento, a tabela existe nesse formato antigo
+-- e o `CREATE TABLE IF NOT EXISTS` abaixo seria um no-op silencioso.
+-- Por isso a seção 4 abre com um bloco DO $$ que detecta e trata esse
+-- cenário antes de criar a tabela.
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -65,6 +75,68 @@ CREATE INDEX IF NOT EXISTS idx_creditos_ia_pendente_estorno
 -- ------------------------------------------------------------
 -- 4. TABELA DE ASSINATURAS
 -- ------------------------------------------------------------
+-- ⚠️ Trava de compatibilidade com a tabela órfã do schema.sql.
+--
+-- src/database/schema.sql (linha ~155) define uma `assinaturas` bem
+-- mais simples (sem stripe_customer_id/stripe_subscription_id, sem
+-- periodo_fim, sem UNIQUE em restaurante_id, sem CHECK de status).
+-- Nada em src/ referencia essa tabela — provavelmente nunca foi
+-- usada —, mas se schema.sql já foi rodado manualmente no Supabase em
+-- algum momento, a tabela existe com esse formato antigo. Nesse caso
+-- o `CREATE TABLE IF NOT EXISTS` logo abaixo seria um no-op: a tabela
+-- ficaria pra sempre sem as colunas do Stripe, e tudo que o ciclo 2
+-- constrói em cima dela quebraria em produção sem erro nenhum na
+-- aplicação desta migration.
+--
+-- Este bloco decide o que fazer olhando o formato real da tabela:
+--   - formato antigo (sem stripe_customer_id) e vazia  -> dropa, e o
+--     CREATE TABLE IF NOT EXISTS abaixo recria no formato novo.
+--   - formato antigo e com linhas -> RAISE EXCEPTION. Preferimos
+--     falhar ruidosamente aqui a apagar dado de cobrança em silêncio;
+--     quem aplicar a migration decide manualmente como migrar.
+--   - formato novo (já tem stripe_customer_id) -> não faz nada, a
+--     migration segue idempotente.
+--   - tabela não existe -> não faz nada, o CREATE TABLE abaixo cria.
+DO $$
+DECLARE
+  v_tabela_existe BOOLEAN;
+  v_formato_novo BOOLEAN;
+  v_qtd_linhas BIGINT;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'assinaturas'
+  ) INTO v_tabela_existe;
+
+  IF v_tabela_existe THEN
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'assinaturas'
+        AND column_name = 'stripe_customer_id'
+    ) INTO v_formato_novo;
+
+    IF NOT v_formato_novo THEN
+      EXECUTE 'SELECT count(*) FROM public.assinaturas' INTO v_qtd_linhas;
+
+      IF v_qtd_linhas = 0 THEN
+        EXECUTE 'DROP TABLE public.assinaturas';
+      ELSE
+        RAISE EXCEPTION
+          'A tabela public.assinaturas existe no formato ANTIGO (do schema.sql, sem stripe_customer_id) e contém % linha(s) de dados. '
+          'A migration 006 não vai apagar dados de cobrança automaticamente. '
+          'Decida manualmente como migrar essas linhas para o formato novo (com stripe_customer_id, stripe_subscription_id, periodo_fim, cancelada_em) '
+          'e então rode esta migration novamente.',
+          v_qtd_linhas;
+      END IF;
+    END IF;
+  END IF;
+END;
+$$;
+
 CREATE TABLE IF NOT EXISTS assinaturas (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     restaurante_id UUID NOT NULL UNIQUE REFERENCES restaurantes(id) ON DELETE CASCADE,
