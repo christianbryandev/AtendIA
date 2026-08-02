@@ -722,7 +722,12 @@ app.post('/api/crm/reativacao', autenticar, exigirAssinaturaAtiva, async (req, r
     const resultado = await runReactivationCampaign(restauranteIdSeguro, diasAusente || 15);
     return res.json(resultado);
   } catch (err) {
-    return res.status(401).json({ error: 'Token inválido ou expirado' });
+    // O middleware "autenticar" já barra token inválido antes de chegar
+    // aqui, então qualquer erro neste ponto é falha real da campanha
+    // (ex.: banco fora do ar) e não deve ser relatado como problema de
+    // autenticação.
+    console.error('[CRM Reativação] Falha ao disparar campanha:', err);
+    return res.status(500).json({ error: 'Erro ao disparar campanha de reativação.' });
   }
 });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const listarSubscriptionsMock = vi.fn();
 const atualizarStatusMock = vi.fn();
@@ -13,7 +13,7 @@ vi.mock('./assinatura-repo.js', () => ({
   buscarAssinatura: (...a: unknown[]) => buscarAssinaturaMock(...a),
 }));
 
-const { reconciliarSePreciso } = await import('./status.js');
+const { reconciliarSePreciso, _resetLimiteDeConsultaStripeParaTeste } = await import('./status.js');
 
 const agora = () => new Date().toISOString();
 const minutosAtras = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
@@ -21,6 +21,9 @@ const minutosAtras = (n: number) => new Date(Date.now() - n * 60_000).toISOStrin
 beforeEach(() => {
   vi.clearAllMocks();
   listarSubscriptionsMock.mockResolvedValue({ data: [] });
+  // O limite de consultas ao Stripe vive num mapa a nível de módulo; sem
+  // limpá-lo, um teste vaza estado pro próximo (ambos usam 'rest-1').
+  _resetLimiteDeConsultaStripeParaTeste();
 });
 
 describe('reconciliarSePreciso', () => {
@@ -92,5 +95,52 @@ describe('reconciliarSePreciso', () => {
     const status = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
 
     expect(status).toBe('pendente');
+  });
+
+  // A tela de confirmação de pagamento faz polling desta rota a cada
+  // poucos segundos. Sem um teto por restaurante, isso vira uma rajada
+  // de chamadas ao Stripe sem limite.
+  describe('limite de uma consulta ao Stripe por minuto', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'));
+      buscarAssinaturaMock.mockResolvedValue({ stripeCustomerId: 'cus_1' });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    // Id exclusivo destes testes: o mapa de limite é do módulo (compartilhado
+    // entre testes) e os demais casos deste arquivo rodam com o relógio real,
+    // então usar 'rest-1' aqui poderia herdar uma entrada com timestamp real.
+    const restauranteId = 'rest-limite-stripe';
+
+    it('consulta o Stripe na primeira chamada', async () => {
+      await reconciliarSePreciso(restauranteId, minutosAtras(10), 'pendente');
+
+      expect(listarSubscriptionsMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('não consulta o Stripe de novo dentro da janela de 60s, e devolve o status do banco', async () => {
+      await reconciliarSePreciso(restauranteId, minutosAtras(10), 'pendente');
+      listarSubscriptionsMock.mockClear();
+
+      vi.advanceTimersByTime(30_000);
+      const status = await reconciliarSePreciso(restauranteId, minutosAtras(10), 'pendente');
+
+      expect(listarSubscriptionsMock).not.toHaveBeenCalled();
+      expect(status).toBe('pendente');
+    });
+
+    it('volta a consultar o Stripe depois que a janela de 60s passa', async () => {
+      await reconciliarSePreciso(restauranteId, minutosAtras(10), 'pendente');
+      listarSubscriptionsMock.mockClear();
+
+      vi.advanceTimersByTime(60_001);
+      await reconciliarSePreciso(restauranteId, minutosAtras(10), 'pendente');
+
+      expect(listarSubscriptionsMock).toHaveBeenCalledTimes(1);
+    });
   });
 });
