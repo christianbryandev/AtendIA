@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Outlet } from 'react-router-dom';
 import SiteLayout from './components/layout/SiteLayout';
 import Landing from './pages/site/Landing';
 import Sobre from './pages/site/Sobre';
@@ -26,25 +26,38 @@ const Carregando = () => (
   <div className="py-24 text-center text-sm text-ink-600">Carregando…</div>
 );
 
+// AssinaturaProvider so envolve as rotas que realmente consultam o status
+// da assinatura (pagamento, confirmacao e painel). Se envolvesse tambem as
+// rotas publicas, o useEffect do provider dispararia /billing/status sem
+// token para qualquer visitante da landing, e o 401 do backend expulsaria
+// esse visitante para o login. Escopando o provider, ele so monta ao
+// entrar nessas rotas — inclusive para um lojista que sai da landing e
+// entra no painel, ja que o provider nao existia antes disso.
+const AreaComAssinatura = () => (
+  <AssinaturaProvider>
+    <Outlet />
+  </AssinaturaProvider>
+);
+
 export default function App() {
   return (
     <Suspense fallback={<Carregando />}>
-      <AssinaturaProvider>
-        <Routes>
-          {/* Site publico: herda Header e Footer via SiteLayout */}
-          <Route element={<SiteLayout />}>
-            <Route path="/" element={<Landing />} />
-            <Route path="/sobre" element={<Sobre />} />
-            <Route path="/cadastro" element={<Cadastro />} />
-            <Route path="/termos" element={<LegalPage documento="termos" />} />
-            <Route path="/privacidade" element={<LegalPage documento="privacidade" />} />
-            <Route path="/exclusao-de-dados" element={<LegalPage documento="exclusao-de-dados" />} />
-            <Route path="*" element={<NaoEncontrado />} />
-          </Route>
+      <Routes>
+        {/* Site publico: herda Header e Footer via SiteLayout */}
+        <Route element={<SiteLayout />}>
+          <Route path="/" element={<Landing />} />
+          <Route path="/sobre" element={<Sobre />} />
+          <Route path="/cadastro" element={<Cadastro />} />
+          <Route path="/termos" element={<LegalPage documento="termos" />} />
+          <Route path="/privacidade" element={<LegalPage documento="privacidade" />} />
+          <Route path="/exclusao-de-dados" element={<LegalPage documento="exclusao-de-dados" />} />
+          <Route path="*" element={<NaoEncontrado />} />
+        </Route>
 
-          {/* Painel: fora do layout do site, tera navegacao propria no ciclo 3 */}
-          <Route path="/login" element={<Login />} />
+        {/* Painel: fora do layout do site, tera navegacao propria no ciclo 3 */}
+        <Route path="/login" element={<Login />} />
 
+        <Route element={<AreaComAssinatura />}>
           {/* Pagamento e confirmacao exigem login, mas nao assinatura:
               sao justamente as telas de quem ainda nao pagou. */}
           <Route path="/assinatura/pagamento" element={<ProtectedRoute><Pagamento /></ProtectedRoute>} />
@@ -55,8 +68,8 @@ export default function App() {
           <Route path="/app/ifood" element={<ProtectedRoute exigirAssinatura><Ifood /></ProtectedRoute>} />
           <Route path="/app/assinatura" element={<ProtectedRoute exigirAssinatura><Assinatura /></ProtectedRoute>} />
           <Route path="/app/creditos" element={<ProtectedRoute exigirAssinatura><Creditos /></ProtectedRoute>} />
-        </Routes>
-      </AssinaturaProvider>
+        </Route>
+      </Routes>
     </Suspense>
   );
 }

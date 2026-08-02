@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
@@ -48,4 +48,27 @@ describe('Roteamento', () => {
     },
     15000
   );
+});
+
+describe('Visitante anônimo na landing', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it('nunca consulta /billing/status nem redireciona para o login', async () => {
+    localStorage.clear();
+    // fetch real (nao ausente, como no jsdom padrao) para provar que a
+    // ausencia de chamada e proposital, e nao um efeito colateral de o
+    // fetch nem existir no ambiente de teste.
+    const fetchMock = vi.fn(() =>
+      Promise.reject(new Error('fetch nao deveria ser chamado pela landing'))
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderEm('/');
+
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
