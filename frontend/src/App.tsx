@@ -6,6 +6,7 @@ import Sobre from './pages/site/Sobre';
 import Cadastro from './pages/site/Cadastro';
 import NaoEncontrado from './pages/site/NaoEncontrado';
 import ProtectedRoute from './components/ProtectedRoute';
+import PainelLayout from './components/app/PainelLayout';
 import { AssinaturaProvider } from './contexts/AssinaturaContext';
 
 // O painel so e baixado quando o usuario entra nele. Sem isso, um
@@ -63,11 +64,17 @@ export default function App() {
           <Route path="/assinatura/pagamento" element={<ProtectedRoute><Pagamento /></ProtectedRoute>} />
           <Route path="/assinatura/confirmando" element={<ProtectedRoute><Confirmando /></ProtectedRoute>} />
 
-          <Route path="/app/dashboard" element={<ProtectedRoute exigirAssinatura><Dashboard /></ProtectedRoute>} />
-          <Route path="/app/crm" element={<ProtectedRoute exigirAssinatura><Crm /></ProtectedRoute>} />
-          <Route path="/app/ifood" element={<ProtectedRoute exigirAssinatura><Ifood /></ProtectedRoute>} />
-          <Route path="/app/assinatura" element={<ProtectedRoute exigirAssinatura><Assinatura /></ProtectedRoute>} />
-          <Route path="/app/creditos" element={<ProtectedRoute exigirAssinatura><Creditos /></ProtectedRoute>} />
+          {/* PainelLayout concentra a trava de assinatura e a faixa de
+              aviso de cota, para o aviso aparecer em TODA tela do painel
+              — inclusive no Dashboard, no CRM e no iFood, onde o lojista
+              passa o dia. */}
+          <Route element={<PainelLayout />}>
+            <Route path="/app/dashboard" element={<Dashboard />} />
+            <Route path="/app/crm" element={<Crm />} />
+            <Route path="/app/ifood" element={<Ifood />} />
+            <Route path="/app/assinatura" element={<Assinatura />} />
+            <Route path="/app/creditos" element={<Creditos />} />
+          </Route>
         </Route>
       </Routes>
     </Suspense>
