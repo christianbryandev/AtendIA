@@ -65,4 +65,46 @@ describe('validarPayloadCadastro', () => {
     const r = validarPayloadCadastro({ ...valido, complemento: '' });
     expect(r.ok).toBe(true);
   });
+
+  it('recusa campo obrigatório ausente com mensagem em português (nao a padrao do zod)', () => {
+    const { numero, ...semNumero } = valido;
+    const r = validarPayloadCadastro(semNumero);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(400);
+      expect(r.erro).toBe('Campo obrigatório.');
+      expect(r.erro.toLowerCase()).not.toContain('required');
+    }
+  });
+
+  it('recusa campo com tipo errado (numero onde se espera string) com mensagem em portugues', () => {
+    const r = validarPayloadCadastro({ ...valido, nome: 12345 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(400);
+      expect(r.erro).toBe('Campo obrigatório.');
+      expect(r.erro.toLowerCase()).not.toContain('expected');
+      expect(r.erro.toLowerCase()).not.toContain('received');
+    }
+  });
+
+  it('recusa payload que nao e um objeto (null) com mensagem em portugues', () => {
+    const r = validarPayloadCadastro(null);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(400);
+      expect(r.erro).toBe('Campo obrigatório.');
+      expect(r.erro.toLowerCase()).not.toContain('expected');
+    }
+  });
+
+  it('recusa payload que nao e um objeto (string) com mensagem em portugues', () => {
+    const r = validarPayloadCadastro('nao sou um objeto');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.status).toBe(400);
+      expect(r.erro).toBe('Campo obrigatório.');
+      expect(r.erro.toLowerCase()).not.toContain('expected');
+    }
+  });
 });

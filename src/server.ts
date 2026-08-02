@@ -349,6 +349,12 @@ app.post('/api/auth/refresh', async (req, res) => {
 // ------------------------------------------------------------------
 // A conta nasce antes do pagamento, com assinatura 'pendente'. Quem
 // abandona o Checkout retoma pelo login, sem recadastrar.
+//
+// Mensagem genérica para conflito de CNPJ (ver comentário no uso
+// abaixo): propositalmente vaga para não permitir enumeração da
+// carteira de clientes por CNPJ.
+const MENSAGEM_CADASTRO_DUPLICADO = 'Não foi possível concluir o cadastro com estes dados. Se você já é cliente, entre com sua conta.';
+
 app.post('/api/auth/cadastro', async (req, res) => {
   const validacao = validarPayloadCadastro(req.body);
 
@@ -371,7 +377,12 @@ app.post('/api/auth/cadastro', async (req, res) => {
     .from('restaurantes').select('id').eq('cnpj', d.cnpj).maybeSingle();
 
   if (cnpjExistente) {
-    return res.status(409).json({ success: false, error: 'Já existe uma conta com este CNPJ.' });
+    // Mensagem propositalmente vaga: diferente do e-mail (que é dado
+    // pessoal de quem está tentando logar), o CNPJ é dado empresarial
+    // público. Uma mensagem específica de "CNPJ já cadastrado" permite
+    // a um concorrente descobrir a carteira de clientes testando um
+    // CNPJ por vez. Não troque por uma mensagem mais específica.
+    return res.status(409).json({ success: false, error: MENSAGEM_CADASTRO_DUPLICADO });
   }
 
   const { data: restaurante, error: erroRestaurante } = await supabaseAdmin
@@ -393,6 +404,16 @@ app.post('/api/auth/cadastro', async (req, res) => {
 
   if (erroRestaurante || !restaurante) {
     console.error('[Cadastro] Falha ao criar restaurante:', erroRestaurante);
+
+    // Corrida: outro cadastro com o mesmo CNPJ venceu a checagem de
+    // unicidade acima e inseriu primeiro. O Postgres devolve 23505
+    // (unique_violation), que o supabase-js expõe em error.code.
+    // Respondemos 409 em vez do genérico de "tente novamente", porque
+    // retentar com o mesmo CNPJ falharia sempre.
+    if (erroRestaurante?.code === '23505') {
+      return res.status(409).json({ success: false, error: MENSAGEM_CADASTRO_DUPLICADO });
+    }
+
     return res.status(500).json({ success: false, error: 'Não foi possível criar a conta. Tente novamente.' });
   }
 
@@ -406,7 +427,19 @@ app.post('/api/auth/cadastro', async (req, res) => {
 
   if (erroUsuario || !usuario) {
     console.error('[Cadastro] Falha ao criar usuário, revertendo restaurante:', erroUsuario);
-    await supabaseAdmin.from('restaurantes').delete().eq('id', restaurante.id);
+    const { error: erroReversao } = await supabaseAdmin.from('restaurantes').delete().eq('id', restaurante.id);
+    if (erroReversao) {
+      // Sem isso, um restaurante órfão (sem usuário nem assinatura)
+      // fica no banco sem nenhum rastro para investigação posterior.
+      console.error(`[Cadastro] Falha ao reverter restaurante orfao ${restaurante.id}:`, erroReversao);
+    }
+
+    // Corrida: outro cadastro com o mesmo e-mail venceu a checagem de
+    // unicidade acima. Mesma lógica do CNPJ: 409, não "tente novamente".
+    if (erroUsuario?.code === '23505') {
+      return res.status(409).json({ success: false, error: 'Já existe uma conta com este e-mail.' });
+    }
+
     return res.status(500).json({ success: false, error: 'Não foi possível criar a conta. Tente novamente.' });
   }
 
@@ -416,7 +449,10 @@ app.post('/api/auth/cadastro', async (req, res) => {
 
   if (erroAssinatura) {
     console.error('[Cadastro] Falha ao criar assinatura, revertendo:', erroAssinatura);
-    await supabaseAdmin.from('restaurantes').delete().eq('id', restaurante.id);
+    const { error: erroReversao } = await supabaseAdmin.from('restaurantes').delete().eq('id', restaurante.id);
+    if (erroReversao) {
+      console.error(`[Cadastro] Falha ao reverter restaurante orfao ${restaurante.id}:`, erroReversao);
+    }
     return res.status(500).json({ success: false, error: 'Não foi possível criar a conta. Tente novamente.' });
   }
 
