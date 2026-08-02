@@ -562,6 +562,19 @@ app.get('/api/billing/status', autenticar, async (req, res) => {
   });
 });
 
+// Extrato de consumo, para a tela de créditos mostrar os últimos
+// lançamentos. É secundário: se falhar, não deve derrubar a compra de pacotes.
+app.get('/api/billing/extrato', autenticar, async (req, res) => {
+  const { data } = await supabaseAdmin
+    .from('creditos_ia')
+    .select('tipo_evento, creditos_consumidos, motivo_reembolso, origem, created_at')
+    .eq('restaurante_id', req.restauranteId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  return res.json({ success: true, lancamentos: data ?? [] });
+});
+
 // ------------------------------------------------------------------
 // 3.4 WEBHOOK DO STRIPE
 // ------------------------------------------------------------------
