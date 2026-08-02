@@ -21,6 +21,9 @@ Este repositório contém o código-fonte completo do sistema SaaS de Gestão de
    npm install
    ```
 2. Configurar o arquivo `.env` com suas chaves de API (`SUPABASE_URL`, `GROQ_API_KEY`, `OPENAI_API_KEY`, `META_WHATSAPP_TOKEN`).
+   Para cobrança, configurar também: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+   `STRIPE_PRICE_ASSINATURA`, `STRIPE_PRICE_CREDITOS_2500`, `STRIPE_PRICE_CREDITOS_5000`,
+   `STRIPE_PRICE_CREDITOS_10000` e `APP_URL`.
 3. Executar em modo de desenvolvimento:
    ```bash
    npm run dev

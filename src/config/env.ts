@@ -25,6 +25,16 @@ const envSchema = z.object({
   MERCADO_PAGO_ACCESS_TOKEN: z.string().optional(),
   IFOOD_CLIENT_ID: z.string().optional(),
   IFOOD_CLIENT_SECRET: z.string().optional(),
+  // Opcionais no schema para o backend subir em máquina sem Stripe
+  // configurado. getStripe() falha com mensagem clara na hora de usar —
+  // melhor do que impedir todo o resto do sistema de rodar.
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_PRICE_ASSINATURA: z.string().optional(),
+  STRIPE_PRICE_CREDITOS_2500: z.string().optional(),
+  STRIPE_PRICE_CREDITOS_5000: z.string().optional(),
+  STRIPE_PRICE_CREDITOS_10000: z.string().optional(),
+  APP_URL: z.string().url().default('http://localhost:5173'),
 });
 
 export const env = envSchema.parse(process.env);
