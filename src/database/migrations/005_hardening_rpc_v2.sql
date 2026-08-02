@@ -126,7 +126,12 @@ $$ LANGUAGE plpgsql;
 -- SOBRECARGA, deixando a assinatura antiga e vulnerável no banco.
 DROP FUNCTION IF EXISTS atualizar_pedido_concluido(UUID, NUMERIC);
 
-CREATE FUNCTION atualizar_pedido_concluido(
+-- CREATE OR REPLACE (e não CREATE puro) para a migration ser idempotente:
+-- rodada uma segunda vez, o DROP acima vira no-op porque a assinatura
+-- antiga já não existe, e um CREATE puro falharia com "function already
+-- exists with same argument types" — dando a falsa impressão de que a
+-- migration não havia sido aplicada.
+CREATE OR REPLACE FUNCTION atualizar_pedido_concluido(
     p_cliente_id UUID,
     p_restaurante_id UUID,
     p_valor_total NUMERIC
