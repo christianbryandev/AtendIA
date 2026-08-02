@@ -104,6 +104,24 @@ describe('criarSessaoPacote', () => {
     );
   });
 
+  // A metadata da Checkout Session NÃO desce para a Charge. Sem
+  // repeti-la no PaymentIntent, o reembolso de um pacote chega ao
+  // webhook indistinguível do reembolso da mensalidade — e o handler
+  // cancelaria a assinatura e zeraria a cota do restaurante.
+  it('repassa a metadata do pacote para o PaymentIntent, para a Charge herdar', async () => {
+    buscarAssinaturaMock.mockResolvedValue({ status: 'ativa', stripeCustomerId: 'cus_1' });
+
+    await criarSessaoPacote('rest-1', 'creditos_5000');
+
+    expect(criarSessaoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_intent_data: {
+          metadata: { restaurante_id: 'rest-1', pacote_id: 'creditos_5000' },
+        },
+      }),
+    );
+  });
+
   it('recusa pacote que não existe no catálogo', async () => {
     buscarAssinaturaMock.mockResolvedValue({ status: 'ativa', stripeCustomerId: 'cus_1' });
 

@@ -94,6 +94,15 @@ export async function criarSessaoPacote(restauranteId: string, pacoteId: string)
     line_items: [{ price: pacote.priceId, quantity: 1 }],
     client_reference_id: restauranteId,
     metadata: { restaurante_id: restauranteId, pacote_id: pacote.id },
+    // A metadata da Checkout Session NÃO desce para a Charge. Sem
+    // repeti-la aqui, a Charge do pacote chega ao webhook sem
+    // pacote_id, e um reembolso dela seria confundido com o reembolso
+    // da mensalidade — o que cancela a assinatura e zera a cota do
+    // restaurante. O Stripe copia a metadata do PaymentIntent para a
+    // Charge, então este é o caminho que faz o dado chegar lá.
+    payment_intent_data: {
+      metadata: { restaurante_id: restauranteId, pacote_id: pacote.id },
+    },
     locale: 'pt-BR',
     success_url: `${env.APP_URL}/app/creditos?compra=ok`,
     cancel_url: `${env.APP_URL}/app/creditos`,

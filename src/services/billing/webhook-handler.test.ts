@@ -11,10 +11,14 @@ vi.mock('./assinatura-repo.js', () => ({
 }));
 
 const subscriptionsCancelMock = vi.fn();
+const subscriptionsRetrieveMock = vi.fn();
 
 vi.mock('./stripe-client.js', () => ({
   getStripe: () => ({
-    subscriptions: { cancel: (...a: unknown[]) => subscriptionsCancelMock(...a) },
+    subscriptions: {
+      cancel: (...a: unknown[]) => subscriptionsCancelMock(...a),
+      retrieve: (...a: unknown[]) => subscriptionsRetrieveMock(...a),
+    },
   }),
 }));
 
@@ -42,6 +46,12 @@ beforeEach(() => {
   buscarPorCustomerIdMock.mockResolvedValue({ restauranteId: 'rest-1' });
   buscarAssinaturaMock.mockResolvedValue({ restauranteId: 'rest-1', stripeSubscriptionId: 'sub_1' });
   subscriptionsCancelMock.mockResolvedValue({});
+  // current_period_end vive em items.data[], não na raiz da Subscription,
+  // na versão de API deste SDK. O mock reproduz o formato real.
+  subscriptionsRetrieveMock.mockResolvedValue({
+    id: 'sub_1',
+    items: { data: [{ current_period_end: 1793491200 }] },
+  });
 });
 
 describe('registrarEventoSeNovo', () => {
@@ -55,6 +65,24 @@ describe('registrarEventoSeNovo', () => {
     insertMock.mockResolvedValue({ error: { code: '23505', message: 'duplicate key' } });
 
     await expect(registrarEventoSeNovo('evt_repetido', 'checkout.session.completed')).resolves.toBe(false);
+  });
+
+  // Tratar qualquer erro como duplicata faria a rota responder 200, e o
+  // Stripe nunca retenta um 200: pagamento entra, crédito não.
+  it('lança quando o erro do insert não é violação de chave única', async () => {
+    insertMock.mockResolvedValue({ error: { code: '08006', message: 'connection failure' } });
+
+    await expect(registrarEventoSeNovo('evt_1', 'checkout.session.completed')).rejects.toThrow();
+  });
+
+  // Enquanto a migration 006 não for aplicada, a tabela não existe e o
+  // Postgres devolve 42P01. Esse caso precisa falhar ruidosamente.
+  it('lança quando a tabela de idempotência ainda não existe', async () => {
+    insertMock.mockResolvedValue({
+      error: { code: '42P01', message: 'relation "stripe_eventos_processados" does not exist' },
+    });
+
+    await expect(registrarEventoSeNovo('evt_1', 'checkout.session.completed')).rejects.toThrow();
   });
 });
 
@@ -103,6 +131,34 @@ describe('checkout.session.completed em modo subscription', () => {
   it('credita a cota cheia', async () => {
     await processarEvento(evento);
 
+    expect(rpcMock).toHaveBeenCalledWith('resetar_cota_mensal', {
+      p_restaurante_id: 'rest-1',
+      p_qtd: CREDITOS_DA_COTA,
+    });
+  });
+
+  // Sem isso a linha "Próxima cobrança" da tela de assinatura fica
+  // invisível no primeiro mês inteiro: a Checkout Session não traz a
+  // data, só o invoice.paid da segunda fatura traria.
+  it('grava o fim do periodo lido da subscription', async () => {
+    await processarEvento(evento);
+
+    expect(subscriptionsRetrieveMock).toHaveBeenCalledWith('sub_1');
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({
+      periodoFim: new Date(1793491200 * 1000).toISOString(),
+    }));
+  });
+
+  // Ativar a conta e creditar a cota valem mais do que uma data na tela.
+  it('ativa a conta mesmo se o Stripe falhar ao devolver a subscription', async () => {
+    subscriptionsRetrieveMock.mockRejectedValue(new Error('Stripe fora do ar'));
+
+    await processarEvento(evento);
+
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({
+      status: 'ativa',
+      periodoFim: null,
+    }));
     expect(rpcMock).toHaveBeenCalledWith('resetar_cota_mensal', {
       p_restaurante_id: 'rest-1',
       p_qtd: CREDITOS_DA_COTA,
@@ -194,6 +250,47 @@ describe('customer.subscription.deleted', () => {
 });
 
 describe('charge.refunded', () => {
+  // A compra de pacote gera uma Charge do mesmo Customer da assinatura.
+  // Sem a metadata do pacote na Charge, devolver R$ 59,90 de um pacote
+  // por cortesia cancelaria a assinatura e zeraria a cota do restaurante.
+  it('reembolso TOTAL de pacote avulso nao mexe na assinatura, no status nem na cota', async () => {
+    await processarEvento({
+      id: 'evt_pacote',
+      type: 'charge.refunded',
+      data: {
+        object: {
+          customer: 'cus_1',
+          amount: 5990,
+          amount_refunded: 5990,
+          metadata: { restaurante_id: 'rest-1', pacote_id: 'creditos_2500' },
+        },
+      },
+    } as any);
+
+    expect(subscriptionsCancelMock).not.toHaveBeenCalled();
+    expect(atualizarStatusMock).not.toHaveBeenCalled();
+    expect(rpcMock).not.toHaveBeenCalled();
+  });
+
+  it('reembolso da assinatura (sem pacote_id na metadata) cancela e zera a cota', async () => {
+    await processarEvento({
+      id: 'evt_assinatura',
+      type: 'charge.refunded',
+      data: {
+        object: {
+          customer: 'cus_1',
+          amount: 17999,
+          amount_refunded: 17999,
+          metadata: { restaurante_id: 'rest-1' },
+        },
+      },
+    } as any);
+
+    expect(subscriptionsCancelMock).toHaveBeenCalledWith('sub_1');
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({ status: 'reembolsada' }));
+    expect(rpcMock).toHaveBeenCalledWith('resetar_cota_mensal', { p_restaurante_id: 'rest-1', p_qtd: 0 });
+  });
+
   it('reembolso parcial nao altera status nem cota', async () => {
     await processarEvento({
       id: 'evt_7a',
@@ -249,7 +346,11 @@ describe('charge.refunded', () => {
 
 describe('evento de tipo não tratado', () => {
   it('não faz nada e não quebra', async () => {
-    await processarEvento({ id: 'evt_8', type: 'customer.updated', data: { object: {} } } as any);
+    await processarEvento({
+      id: 'evt_8',
+      type: 'customer.updated',
+      data: { object: { customer: 'cus_1' } },
+    } as any);
 
     expect(atualizarStatusMock).not.toHaveBeenCalled();
     expect(rpcMock).not.toHaveBeenCalled();
@@ -257,16 +358,22 @@ describe('evento de tipo não tratado', () => {
 });
 
 describe('restaurante não encontrado', () => {
-  it('não escreve nada quando o customer é desconhecido', async () => {
+  // Lança em vez de retornar em silêncio: o registro de idempotência já
+  // foi gravado antes de chegar aqui, e um `return` o deixaria valendo
+  // como sucesso — o reenvio do Stripe (que resolveria uma corrida com o
+  // salvamento do customer id) seria descartado como duplicata para
+  // sempre. Lançando, o chamador remove o registro e o reenvio funciona.
+  it('lança e não escreve nada quando o customer é desconhecido', async () => {
     buscarPorCustomerIdMock.mockResolvedValue(null);
 
-    await processarEvento({
+    await expect(processarEvento({
       id: 'evt_9',
       type: 'invoice.payment_failed',
       data: { object: { customer: 'cus_fantasma' } },
-    } as any);
+    } as any)).rejects.toThrow(/sem restaurante identificavel/i);
 
     expect(atualizarStatusMock).not.toHaveBeenCalled();
+    expect(rpcMock).not.toHaveBeenCalled();
   });
 });
 

@@ -3,22 +3,43 @@ import { supabaseAdmin } from '../../config/supabase.js';
 import { atualizarStatus, buscarAssinatura, buscarPorCustomerId } from './assinatura-repo.js';
 import { pacotePorId } from './pacotes.js';
 import { getStripe } from './stripe-client.js';
+import { periodoFimDaSubscription } from './periodo.js';
 
-export const CREDITOS_DA_COTA = 10000;
+import { CREDITOS_DA_COTA } from './cota.js';
+
+// Reexportado para não quebrar quem já importava a constante daqui.
+export { CREDITOS_DA_COTA };
+
+// Código do Postgres para unique_violation, exposto pelo supabase-js em
+// error.code. É o único erro do insert abaixo que significa "evento
+// repetido"; qualquer outro é falha de infraestrutura.
+const POSTGRES_UNIQUE_VIOLATION = '23505';
 
 /**
  * Grava o evento e diz se ele é novo. O Stripe reenvia quando não
  * recebe 200; sem esta trava, um reenvio credita a cota duas vezes.
  *
  * Só vale como "processado com sucesso" — ver removerRegistroEvento.
+ *
+ * Tratar QUALQUER erro do insert como duplicata seria pior do que não
+ * ter idempotência: um blip do Supabase (ou a migration 006 ainda não
+ * aplicada, com a tabela nem existindo) faria a rota responder 200, e o
+ * Stripe nunca retenta um 200 — pagamento entrando e crédito não, em
+ * silêncio. Só a violação de chave única é duplicata; o resto lança,
+ * para a rota devolver 500 e o Stripe reenviar.
  */
 export async function registrarEventoSeNovo(eventId: string, tipo: string): Promise<boolean> {
   const { error } = await supabaseAdmin
     .from('stripe_eventos_processados')
     .insert([{ event_id: eventId, tipo }]);
 
-  // Violação de chave primária significa evento repetido.
-  return !error;
+  if (!error) return true;
+
+  if (error.code === POSTGRES_UNIQUE_VIOLATION) return false;
+
+  throw new Error(
+    `[Stripe] Falha ao registrar o evento ${eventId} (${tipo}) para idempotencia: ${error.message}`,
+  );
 }
 
 /**
@@ -84,13 +105,48 @@ async function chamarRpc(nome: string, args: Record<string, unknown>): Promise<v
   }
 }
 
+/**
+ * Busca no Stripe a data de fim do ciclo da assinatura recém-criada.
+ *
+ * O objeto Checkout Session não traz essa data — só o id da subscription
+ * —, e sem ela a linha "Próxima cobrança" da tela de assinatura fica
+ * invisível no primeiro mês inteiro, para todo mundo. A partir da
+ * segunda fatura o invoice.paid já grava o período.
+ *
+ * Falha do Stripe aqui NÃO derruba o evento: a ativação e o crédito da
+ * cota valem muito mais do que uma data na tela, e insistir só adiaria
+ * os dois. Perder a data custa uma linha a menos até a renovação.
+ */
+async function buscarPeriodoFim(subscriptionId: string | null): Promise<string | null> {
+  if (!subscriptionId) return null;
+
+  try {
+    const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
+    return periodoFimDaSubscription(subscription);
+  } catch (erro) {
+    console.error(
+      `[Stripe] Nao foi possivel ler o fim do periodo da assinatura ${subscriptionId}; ` +
+      `seguindo sem gravar periodo_fim:`,
+      erro,
+    );
+    return null;
+  }
+}
+
 export async function processarEvento(evento: Stripe.Event): Promise<void> {
   const objeto = evento.data.object as any;
   const restauranteId = await restauranteDoEvento(objeto);
 
+  // Lança em vez de retornar: o registro de idempotência já foi gravado
+  // antes de chegar aqui, e um `return` o deixaria valendo como
+  // "processado com sucesso". Aí um reenvio do Stripe — que é o que
+  // resolveria uma corrida com o salvamento do stripe_customer_id —
+  // seria descartado como duplicata para sempre. Lançando, quem chamou
+  // roda removerRegistroEvento e o reenvio volta a ser tratado como novo.
   if (!restauranteId) {
-    console.error(`[Stripe] Evento ${evento.id} (${evento.type}) sem restaurante identificável.`);
-    return;
+    throw new Error(
+      `[Stripe] Evento ${evento.id} (${evento.type}) sem restaurante identificavel.`,
+    );
   }
 
   switch (evento.type) {
@@ -110,9 +166,12 @@ export async function processarEvento(evento: Stripe.Event): Promise<void> {
         return;
       }
 
+      const subscriptionId = typeof objeto.subscription === 'string' ? objeto.subscription : null;
+
       await atualizarStatus(restauranteId, {
         status: 'ativa',
-        stripeSubscriptionId: typeof objeto.subscription === 'string' ? objeto.subscription : null,
+        stripeSubscriptionId: subscriptionId,
+        periodoFim: await buscarPeriodoFim(subscriptionId),
       });
 
       await chamarRpc('resetar_cota_mensal', {
@@ -158,6 +217,26 @@ export async function processarEvento(evento: Stripe.Event): Promise<void> {
     }
 
     case 'charge.refunded': {
+      // A compra de pacote avulso (mode: 'payment') gera uma Charge do
+      // MESMO Customer da assinatura. Sem esta saída, devolver os
+      // R$ 59,90 de um pacote por cortesia cairia no caminho de baixo,
+      // que cancela a assinatura no Stripe, marca 'reembolsada' e zera a
+      // cota: o restaurante perderia o acesso ao painel por causa de um
+      // reembolso que não tem nada a ver com a mensalidade.
+      //
+      // A metadata chega aqui porque criarSessaoPacote a repassa em
+      // payment_intent_data — o Stripe copia a metadata do PaymentIntent
+      // para a Charge. Não dá para distinguir pelo campo `invoice`: ele
+      // não existe mais no objeto Charge da versão de API deste SDK.
+      if (objeto.metadata?.pacote_id) {
+        console.log(
+          `[Stripe] Evento ${evento.id}: reembolso de pacote avulso ` +
+          `(pacote_id=${objeto.metadata.pacote_id}) do restaurante ${restauranteId}. ` +
+          `A assinatura, o status e a cota nao sao afetados.`,
+        );
+        return;
+      }
+
       // O evento charge.refunded dispara para QUALQUER reembolso da
       // cobrança, inclusive um reembolso parcial (ex.: cortesia de
       // R$ 50 por um problema pontual). Só um reembolso TOTAL significa

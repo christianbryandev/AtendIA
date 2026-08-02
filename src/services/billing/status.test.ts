@@ -13,7 +13,14 @@ vi.mock('./assinatura-repo.js', () => ({
   buscarAssinatura: (...a: unknown[]) => buscarAssinaturaMock(...a),
 }));
 
+const rpcMock = vi.fn();
+
+vi.mock('../../config/supabase.js', () => ({
+  supabaseAdmin: { rpc: (...a: unknown[]) => rpcMock(...a) },
+}));
+
 const { reconciliarSePreciso, _resetLimiteDeConsultaStripeParaTeste } = await import('./status.js');
+const { CREDITOS_DA_COTA } = await import('./cota.js');
 
 const agora = () => new Date().toISOString();
 const minutosAtras = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
@@ -21,6 +28,7 @@ const minutosAtras = (n: number) => new Date(Date.now() - n * 60_000).toISOStrin
 beforeEach(() => {
   vi.clearAllMocks();
   listarSubscriptionsMock.mockResolvedValue({ data: [] });
+  rpcMock.mockResolvedValue({ data: null, error: null });
   // O limite de consultas ao Stripe vive num mapa a nível de módulo; sem
   // limpá-lo, um teste vaza estado pro próximo (ambos usam 'rest-1').
   _resetLimiteDeConsultaStripeParaTeste();
@@ -53,11 +61,16 @@ describe('reconciliarSePreciso', () => {
     );
   });
 
+  // current_period_end vive em items.data[], não na raiz da Subscription,
+  // na versão de API do SDK instalado. O mock reproduz o formato real.
+  const subscriptionAtiva = {
+    id: 'sub_1',
+    items: { data: [{ current_period_end: 1793491200 }] },
+  };
+
   it('ativa a conta quando o Stripe diz que a assinatura existe', async () => {
     buscarAssinaturaMock.mockResolvedValue({ stripeCustomerId: 'cus_1' });
-    listarSubscriptionsMock.mockResolvedValue({
-      data: [{ id: 'sub_1', current_period_end: 1793491200 }],
-    });
+    listarSubscriptionsMock.mockResolvedValue({ data: [subscriptionAtiva] });
 
     const status = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
 
@@ -66,6 +79,45 @@ describe('reconciliarSePreciso', () => {
       stripeSubscriptionId: 'sub_1',
     }));
     expect(status).toBe('ativa');
+  });
+
+  // Sem isto o lojista paga, o painel abre e a IA fica muda: quem credita
+  // a cota é o webhook, que nesta situação é justamente o que não chegou.
+  it('credita a cota mensal ao reconciliar com sucesso', async () => {
+    buscarAssinaturaMock.mockResolvedValue({ stripeCustomerId: 'cus_1' });
+    listarSubscriptionsMock.mockResolvedValue({ data: [subscriptionAtiva] });
+
+    await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
+
+    expect(rpcMock).toHaveBeenCalledWith('resetar_cota_mensal', {
+      p_restaurante_id: 'rest-1',
+      p_qtd: CREDITOS_DA_COTA,
+    });
+  });
+
+  it('grava o fim do periodo lido de items.data[0].current_period_end', async () => {
+    buscarAssinaturaMock.mockResolvedValue({ stripeCustomerId: 'cus_1' });
+    listarSubscriptionsMock.mockResolvedValue({ data: [subscriptionAtiva] });
+
+    await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
+
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({
+      periodoFim: new Date(1793491200 * 1000).toISOString(),
+    }));
+  });
+
+  // A cota é creditada ANTES do status virar 'ativa'. Se a ordem fosse a
+  // inversa e a RPC falhasse, a reconciliação nunca mais rodaria (ela só
+  // age sobre 'pendente') e a cota ficaria perdida até a renovação.
+  it('mantém pendente quando a RPC de cota falha, para a próxima consulta tentar de novo', async () => {
+    buscarAssinaturaMock.mockResolvedValue({ stripeCustomerId: 'cus_1' });
+    listarSubscriptionsMock.mockResolvedValue({ data: [subscriptionAtiva] });
+    rpcMock.mockResolvedValue({ data: null, error: { message: 'banco fora do ar' } });
+
+    const status = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
+
+    expect(atualizarStatusMock).not.toHaveBeenCalled();
+    expect(status).toBe('pendente');
   });
 
   it('mantém pendente quando o Stripe também não conhece assinatura', async () => {

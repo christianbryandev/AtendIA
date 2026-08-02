@@ -1,5 +1,8 @@
+import { supabaseAdmin } from '../../config/supabase.js';
 import { getStripe } from './stripe-client.js';
 import { atualizarStatus, buscarAssinatura } from './assinatura-repo.js';
+import { CREDITOS_DA_COTA } from './cota.js';
+import { periodoFimDaSubscription } from './periodo.js';
 
 const MINUTOS_ATE_RECONCILIAR = 5;
 
@@ -44,6 +47,29 @@ function podeConsultarStripe(restauranteId: string): boolean {
 }
 
 /**
+ * Credita a cota mensal do plano na reconciliação.
+ *
+ * A RPC RESETA o saldo em vez de somar, então chamar aqui é seguro
+ * mesmo que o webhook atrasado chegue depois e chame de novo: o
+ * resultado continua sendo a cota cheia, nunca o dobro.
+ *
+ * supabase-js não lança em erro de RPC, devolve { data, error } — sem
+ * olhar o `error`, uma falha do banco passaria como sucesso.
+ */
+async function creditarCotaDaReconciliacao(restauranteId: string): Promise<void> {
+  const { error } = await supabaseAdmin.rpc('resetar_cota_mensal', {
+    p_restaurante_id: restauranteId,
+    p_qtd: CREDITOS_DA_COTA,
+  });
+
+  if (error) {
+    throw new Error(
+      `[Billing] RPC resetar_cota_mensal falhou na reconciliacao do restaurante ${restauranteId}: ${error.message}`,
+    );
+  }
+}
+
+/**
  * Rede de segurança para webhook perdido: se a conta está pendente há
  * mais que alguns minutos, pergunta ao Stripe e se corrige. É a
  * reconciliação sob demanda, sem cron.
@@ -73,14 +99,22 @@ export async function reconciliarSePreciso(
     const subscription = data[0];
     if (!subscription) return status;
 
-    const periodoFim = typeof (subscription as any).current_period_end === 'number'
-      ? new Date((subscription as any).current_period_end * 1000).toISOString()
-      : null;
+    // A cota vem ANTES do status, de propósito. Quem credita a cota
+    // normalmente é o webhook — e esta reconciliação existe justamente
+    // para o caso em que ele nunca chegou. Sem creditar aqui, o lojista
+    // pagou, o painel abre e a IA continua muda até a renovação, um mês
+    // depois, sem alarme nenhum.
+    //
+    // A ordem importa: se marcássemos 'ativa' primeiro e a RPC falhasse,
+    // a reconciliação nunca mais rodaria (ela só age sobre 'pendente') e
+    // a cota ficaria perdida para sempre. Creditando antes, uma falha
+    // deixa o status em 'pendente' e a próxima consulta tenta de novo.
+    await creditarCotaDaReconciliacao(restauranteId);
 
     await atualizarStatus(restauranteId, {
       status: 'ativa',
       stripeSubscriptionId: subscription.id,
-      periodoFim,
+      periodoFim: periodoFimDaSubscription(subscription),
     });
 
     return 'ativa';
