@@ -206,7 +206,8 @@ o acesso de quem teve o cartão recusado uma vez perde cliente à toa.
 | Webhook nunca chega | `GET /api/billing/status` consulta o Stripe após 5 min em `pendente` |
 | Webhook chega duas vezes | Barrado por `stripe_eventos_processados` antes de creditar |
 | Lojista abandona o Checkout | Conta fica `pendente`; retoma pelo login |
-| Tentativa de assinar duas vezes | Stripe barra pelo mesmo Customer; a segunda sessão devolve erro tratado |
+| Tentativa de assinar duas vezes | `POST /api/billing/checkout` recusa se `assinaturas.status` já é `ativa`. O Stripe **não** impede duas assinaturas do mesmo preço para o mesmo Customer — a trava é nossa, senão o lojista é cobrado em dobro |
+| ViaCEP fora do ar | O endereço vira digitação manual; o cadastro não trava por causa disso |
 | CNPJ já cadastrado | 409 com mensagem clara, antes de tocar no Stripe |
 | Stripe indisponível no cadastro | Conta criada e `pendente`; a tela oferece nova tentativa |
 | Cartão recusado na renovação | `inadimplente`: painel abre com aviso, IA continua atendendo durante as retentativas do Stripe |
@@ -243,8 +244,13 @@ Cada etapa testável antes da seguinte.
 
 ## Dependências externas
 
-Só uma: conta Stripe ativa em nome do MEI. O Stripe exige entidade habilitada
-no Brasil — confirmar que o MEI passa no cadastro antes de construir em cima.
+**Bloqueante:** conta Stripe ativa em nome do MEI. O Stripe exige entidade
+habilitada no Brasil — confirmar que o MEI passa no cadastro antes de construir
+em cima.
+
+**Não bloqueante:** ViaCEP, para autopreencher o endereço no cadastro. Gratuito
+e sem chave. Se estiver fora do ar, o lojista digita o endereço à mão — o
+cadastro não pode travar por causa de um serviço de conveniência.
 
 ## Nota para o ciclo 3
 
