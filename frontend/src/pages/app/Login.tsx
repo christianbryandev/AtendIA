@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { API_URL } from '../../services/api';
 
 export default function Login() {
@@ -8,6 +8,9 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  // Aviso vindo do redirecionamento apos redefinir a senha com sucesso.
+  const aviso = (location.state as { aviso?: string } | null)?.aviso;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,8 +50,14 @@ export default function Login() {
           <p className="mt-1 text-sm text-gray-500">Acesse o painel do seu restaurante</p>
         </div>
 
+        {aviso && (
+          <div role="status" className="mb-5 rounded-lg bg-green-50 p-3 text-sm text-green-700 border border-green-100">
+            {aviso}
+          </div>
+        )}
+
         {error && (
-          <div className="mb-5 rounded-lg bg-red-50 p-3 text-sm text-red-600 border border-red-100">
+          <div role="alert" className="mb-5 rounded-lg bg-red-50 p-3 text-sm text-red-600 border border-red-100">
             {error}
           </div>
         )}
@@ -82,6 +91,11 @@ export default function Login() {
               onChange={(e) => setPassword(e.target.value)}
               required
             />
+            <div className="mt-2 text-right">
+              <Link to="/esqueci-senha" className="text-xs font-semibold text-sky-600 hover:text-sky-700">
+                Esqueci minha senha
+              </Link>
+            </div>
           </div>
 
           <button

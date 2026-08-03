@@ -14,6 +14,8 @@ import { AssinaturaProvider } from './contexts/AssinaturaContext';
 // LegalPage tambem e lazy: ela arrasta react-markdown + remark-gfm + os
 // tres documentos legais inteiros, que nenhum visitante da home precisa.
 const LegalPage = lazy(() => import('./pages/site/LegalPage'));
+const EsqueciSenha = lazy(() => import('./pages/site/EsqueciSenha'));
+const RedefinirSenha = lazy(() => import('./pages/site/RedefinirSenha'));
 const Login = lazy(() => import('./pages/app/Login'));
 const Dashboard = lazy(() => import('./pages/app/Dashboard'));
 const Crm = lazy(() => import('./pages/app/Crm'));
@@ -52,6 +54,8 @@ export default function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/sobre" element={<Sobre />} />
           <Route path="/cadastro" element={<Cadastro />} />
+          <Route path="/esqueci-senha" element={<EsqueciSenha />} />
+          <Route path="/redefinir-senha" element={<RedefinirSenha />} />
           <Route path="/termos" element={<LegalPage documento="termos" />} />
           <Route path="/privacidade" element={<LegalPage documento="privacidade" />} />
           <Route path="/exclusao-de-dados" element={<LegalPage documento="exclusao-de-dados" />} />
