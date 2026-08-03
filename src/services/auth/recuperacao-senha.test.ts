@@ -133,6 +133,77 @@ describe('gerarTokenRecuperacao', () => {
     await expect(gerarTokenRecuperacao('naoexiste@pizzaria.com.br')).resolves.toBeUndefined();
     expect(enviarEmailMock).not.toHaveBeenCalled();
   });
+
+  function mockUsuarioExisteEInsertOk() {
+    fromMock.mockImplementation((tabela: string) => {
+      if (tabela === 'usuarios') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: { id: 'usuario-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (tabela === 'tokens_recuperacao') {
+        return { insert: () => Promise.resolve({ error: null }) };
+      }
+      throw new Error(`tabela inesperada: ${tabela}`);
+    });
+  }
+
+  it('nao aguarda o envio do e-mail: resolve antes do envio terminar (dispara e segue)', async () => {
+    // Envio controlado manualmente: só "termina" quando resolverEnvio()
+    // for chamado, o que só acontece no fim deste teste.
+    let resolverEnvio!: () => void;
+    const envioPendente = new Promise<void>((resolve) => {
+      resolverEnvio = resolve;
+    });
+    enviarEmailMock.mockReturnValue(envioPendente);
+    mockUsuarioExisteEInsertOk();
+
+    let funcaoResolveu = false;
+    const chamada = gerarTokenRecuperacao('lojista@pizzaria.com.br').then(() => {
+      funcaoResolveu = true;
+    });
+
+    // A busca e o insert são mocks que resolvem em microtasks; se a
+    // função não aguarda o envio do e-mail, ela já terá resolvido antes
+    // de qualquer macrotask (setTimeout) rodar. Se estivesse aguardando
+    // o envio — que só resolve quando resolverEnvio() for chamado, o que
+    // ainda não aconteceu aqui — a função continuaria pendente. Usamos
+    // um setTimeout(0) real (em vez de um número de ms arbitrário) como
+    // fronteira de macrotask: é a forma determinística de dar chance a
+    // todas as microtasks pendentes de rodarem, sem depender de timing.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(funcaoResolveu).toBe(true);
+
+    // Limpeza: libera o envio pendente para não deixar promise solta.
+    resolverEnvio();
+    await envioPendente;
+  });
+
+  it('nao deixa a rejeicao do envio de e-mail sem tratamento (nao derruba o processo)', async () => {
+    const erroEnvio = new Error('Resend fora do ar');
+    enviarEmailMock.mockRejectedValue(erroEnvio);
+    mockUsuarioExisteEInsertOk();
+    const erroConsoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(gerarTokenRecuperacao('lojista@pizzaria.com.br')).resolves.toBeUndefined();
+
+    // A rejeição acontece depois que a função já resolveu (é
+    // dispara-e-segue); esperamos os microtasks/macrotasks pendentes
+    // para dar tempo do .catch interno rodar e confirmar que foi tratado.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(erroConsoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Erro ao enviar e-mail'),
+      erroEnvio,
+    );
+
+    erroConsoleSpy.mockRestore();
+  });
 });
 
 describe('validarToken', () => {
@@ -222,41 +293,72 @@ describe('validarToken', () => {
   });
 });
 
+// Constrói um mock de `.from('tokens_recuperacao').update(...).eq(...).is(...).gt(...).select(...)`
+// que simula o UPDATE condicional atômico: só "afeta" a linha (devolve
+// em `.select()`) se `linhaAtual.usado_em` ainda for nulo e o token não
+// estiver expirado — exatamente a condição que o banco real aplicaria
+// via `WHERE usado_em IS NULL AND expira_em > agora`. `linhaAtual` é um
+// objeto mutável para permitir simular duas chamadas concorrentes lendo
+// e escrevendo o "mesmo estado" do banco.
+function criarMockDeTokensRecuperacao(linhaAtual: {
+  id: string;
+  usuario_id: string;
+  expira_em: string;
+  usado_em: string | null;
+} | null) {
+  return {
+    update: (valores: Record<string, unknown>) => ({
+      eq: (coluna: string, valor: string) => {
+        expect(coluna).toBe('token_hash');
+        return {
+          is: (colunaUsado: string, valorUsado: null) => {
+            expect(colunaUsado).toBe('usado_em');
+            expect(valorUsado).toBeNull();
+            return {
+              gt: (colunaExpira: string, valorExpira: string) => {
+                expect(colunaExpira).toBe('expira_em');
+                return {
+                  select: (_colunas: string) => {
+                    if (
+                      !linhaAtual ||
+                      linhaAtual.usado_em !== null ||
+                      new Date(linhaAtual.expira_em).getTime() <= new Date(valorExpira).getTime()
+                    ) {
+                      // Condição do WHERE não bateu: nenhuma linha afetada.
+                      return Promise.resolve({ data: [], error: null });
+                    }
+                    // Condição bateu: "grava" o usado_em no estado mockado
+                    // e devolve a linha afetada, como o Supabase real faria.
+                    linhaAtual.usado_em = valores.usado_em as string;
+                    return Promise.resolve({
+                      data: [{ id: linhaAtual.id, usuario_id: linhaAtual.usuario_id }],
+                      error: null,
+                    });
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    }),
+  };
+}
+
 describe('consumirTokenERedefinir', () => {
   const TOKEN = 'b'.repeat(64);
 
   it('grava a nova senha com bcrypt e marca o token como usado', async () => {
     let senhaHashGravada: string | undefined;
-    let tokenMarcadoUsado = false;
+    const linhaAtual = {
+      id: 'token-1',
+      usuario_id: 'usuario-1',
+      expira_em: new Date(Date.now() + 60_000).toISOString(),
+      usado_em: null as string | null,
+    };
 
     fromMock.mockImplementation((tabela: string) => {
-      if (tabela === 'tokens_recuperacao') {
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: {
-                    id: 'token-1',
-                    usuario_id: 'usuario-1',
-                    expira_em: new Date(Date.now() + 60_000).toISOString(),
-                    usado_em: null,
-                  },
-                  error: null,
-                }),
-            }),
-          }),
-          update: (valores: Record<string, unknown>) => ({
-            eq: (coluna: string, valor: string) => {
-              expect(coluna).toBe('id');
-              expect(valor).toBe('token-1');
-              expect(valores.usado_em).toBeTruthy();
-              tokenMarcadoUsado = true;
-              return Promise.resolve({ error: null });
-            },
-          }),
-        };
-      }
+      if (tabela === 'tokens_recuperacao') return criarMockDeTokensRecuperacao(linhaAtual);
       if (tabela === 'usuarios') {
         return {
           update: (valores: Record<string, unknown>) => ({
@@ -279,29 +381,19 @@ describe('consumirTokenERedefinir', () => {
     // Nunca em texto puro: o valor gravado precisa ser um hash bcrypt válido.
     expect(senhaHashGravada).not.toBe('novaSenhaForte123');
     await expect(bcrypt.compare('novaSenhaForte123', senhaHashGravada!)).resolves.toBe(true);
-    expect(tokenMarcadoUsado).toBe(true);
+    expect(linhaAtual.usado_em).toBeTruthy();
   });
 
   it('recusa token ja usado e nao altera a senha', async () => {
+    const linhaAtual = {
+      id: 'token-1',
+      usuario_id: 'usuario-1',
+      expira_em: new Date(Date.now() + 60_000).toISOString(),
+      usado_em: new Date().toISOString(),
+    };
+
     fromMock.mockImplementation((tabela: string) => {
-      if (tabela === 'tokens_recuperacao') {
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: {
-                    id: 'token-1',
-                    usuario_id: 'usuario-1',
-                    expira_em: new Date(Date.now() + 60_000).toISOString(),
-                    usado_em: new Date().toISOString(),
-                  },
-                  error: null,
-                }),
-            }),
-          }),
-        };
-      }
+      if (tabela === 'tokens_recuperacao') return criarMockDeTokensRecuperacao(linhaAtual);
       throw new Error(`tabela inesperada nesta chamada: ${tabela}`);
     });
 
@@ -310,25 +402,15 @@ describe('consumirTokenERedefinir', () => {
   });
 
   it('recusa token expirado e nao altera a senha', async () => {
+    const linhaAtual = {
+      id: 'token-1',
+      usuario_id: 'usuario-1',
+      expira_em: new Date(Date.now() - 60_000).toISOString(),
+      usado_em: null as string | null,
+    };
+
     fromMock.mockImplementation((tabela: string) => {
-      if (tabela === 'tokens_recuperacao') {
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: {
-                    id: 'token-1',
-                    usuario_id: 'usuario-1',
-                    expira_em: new Date(Date.now() - 60_000).toISOString(),
-                    usado_em: null,
-                  },
-                  error: null,
-                }),
-            }),
-          }),
-        };
-      }
+      if (tabela === 'tokens_recuperacao') return criarMockDeTokensRecuperacao(linhaAtual);
       throw new Error(`tabela inesperada nesta chamada: ${tabela}`);
     });
 
@@ -338,19 +420,42 @@ describe('consumirTokenERedefinir', () => {
 
   it('recusa token inexistente', async () => {
     fromMock.mockImplementation((tabela: string) => {
-      if (tabela === 'tokens_recuperacao') {
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: null, error: null }),
-            }),
-          }),
-        };
-      }
+      if (tabela === 'tokens_recuperacao') return criarMockDeTokensRecuperacao(null);
       throw new Error(`tabela inesperada nesta chamada: ${tabela}`);
     });
 
     const resultado = await consumirTokenERedefinir(TOKEN, 'novaSenhaForte123');
     expect(resultado).toBe(false);
+  });
+
+  it('corrida: duas chamadas concorrentes com o mesmo token, apenas uma tem sucesso', async () => {
+    // Estado único, compartilhado pelas duas chamadas "concorrentes" —
+    // simula a mesma linha no banco sendo disputada por duas requisições.
+    const linhaAtual = {
+      id: 'token-1',
+      usuario_id: 'usuario-1',
+      expira_em: new Date(Date.now() + 60_000).toISOString(),
+      usado_em: null as string | null,
+    };
+
+    fromMock.mockImplementation((tabela: string) => {
+      if (tabela === 'tokens_recuperacao') return criarMockDeTokensRecuperacao(linhaAtual);
+      if (tabela === 'usuarios') {
+        return {
+          update: () => ({
+            eq: () => Promise.resolve({ error: null }),
+          }),
+        };
+      }
+      throw new Error(`tabela inesperada: ${tabela}`);
+    });
+
+    const [resultadoAtacante, resultadoVitima] = await Promise.all([
+      consumirTokenERedefinir(TOKEN, 'senhaDoAtacante123'),
+      consumirTokenERedefinir(TOKEN, 'senhaDaVitima123'),
+    ]);
+
+    const sucessos = [resultadoAtacante, resultadoVitima].filter((r) => r === true);
+    expect(sucessos).toHaveLength(1);
   });
 });

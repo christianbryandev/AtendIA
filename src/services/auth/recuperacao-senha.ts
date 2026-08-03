@@ -78,14 +78,18 @@ export async function gerarTokenRecuperacao(email: string): Promise<void> {
   const link = `${env.APP_URL}/redefinir-senha?token=${token}`;
   const { subject, html } = templateRecuperacaoSenha(link);
 
-  try {
-    await enviarEmail({ to: email, subject, html });
-  } catch (erroEnvio) {
-    // O token já foi gravado; sem o e-mail o lojista não recebe o link,
-    // mas isso não pode virar um erro que denuncie, na resposta da
-    // rota, se a conta existe ou não.
+  // Dispara e segue: NÃO aguardamos o envio do e-mail (chamada de rede ao
+  // Resend) antes de devolver o controle para a rota. Se esperássemos,
+  // o tempo de resposta de "esqueci-senha" ficaria visivelmente maior
+  // quando o e-mail existe do que quando não existe — um canal lateral
+  // de tempo que permite descobrir quais e-mails são clientes mesmo com
+  // a mensagem de resposta idêntica nos dois casos. O `.catch` aqui é
+  // obrigatório: sem ele, uma rejeição não capturada de uma Promise solta
+  // derruba o processo Node. A falha de envio ainda é registrada no
+  // console — ela não pode sumir em silêncio.
+  enviarEmail({ to: email, subject, html }).catch((erroEnvio) => {
     console.error('[RecuperacaoSenha] Erro ao enviar e-mail de recuperacao:', erroEnvio);
-  }
+  });
 }
 
 /** Devolve o usuario_id do token, ou null se ele não existe, expirou ou já foi usado. */
@@ -110,18 +114,37 @@ export async function validarToken(token: string): Promise<string | null> {
  * Devolve `false` sem alterar nada quando o token não existe, expirou
  * ou já foi usado — uso único, senão o link do e-mail vira uma chave
  * permanente enquanto durar a validade de 1 hora.
+ *
+ * Uso único de verdade exige atomicidade: duas requisições concorrentes
+ * com o mesmo token não podem passar ambas. Por isso a marcação de
+ * `usado_em` acontece PRIMEIRO, num único UPDATE condicionado a
+ * `usado_em IS NULL` e `expira_em` ainda no futuro, e só prosseguimos se
+ * esse UPDATE afetou exatamente uma linha (via `.select()` no retorno,
+ * que devolve as linhas realmente atualizadas). Se outra requisição já
+ * tiver vencido a corrida — ou o token nunca existiu, ou já expirou — o
+ * UPDATE não afeta nenhuma linha e recusamos, sem tocar na senha.
  */
 export async function consumirTokenERedefinir(token: string, novaSenha: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin
+  const agora = new Date().toISOString();
+
+  const { data: linhasMarcadas, error: erroMarcarUsado } = await supabaseAdmin
     .from('tokens_recuperacao')
-    .select('id, usuario_id, expira_em, usado_em')
+    .update({ usado_em: agora })
     .eq('token_hash', hashDoToken(token))
-    .maybeSingle();
+    .is('usado_em', null)
+    .gt('expira_em', agora)
+    .select('id, usuario_id');
 
-  if (error || !data) return false;
+  if (erroMarcarUsado) {
+    console.error('[RecuperacaoSenha] Erro ao marcar token como usado:', erroMarcarUsado);
+    return false;
+  }
 
-  const linha = data as LinhaTokenRecuperacao;
-  if (!tokenAindaValido(linha)) return false;
+  // Nenhuma linha afetada: token inexistente, expirado ou já consumido
+  // por outra requisição que venceu a corrida. Nada foi alterado.
+  if (!linhasMarcadas || linhasMarcadas.length !== 1) return false;
+
+  const linha = linhasMarcadas[0] as Pick<LinhaTokenRecuperacao, 'id' | 'usuario_id'>;
 
   const senhaHash = await bcrypt.hash(novaSenha, 10);
 
@@ -131,20 +154,16 @@ export async function consumirTokenERedefinir(token: string, novaSenha: string):
     .eq('id', linha.usuario_id);
 
   if (erroSenha) {
-    console.error('[RecuperacaoSenha] Erro ao gravar a nova senha:', erroSenha);
+    // O token já foi marcado como usado (a marcação vem primeiro, de
+    // propósito, para garantir o uso único), mas a senha não mudou. Não
+    // existe como "devolver" o token — ele fica queimado. Reportamos
+    // falha ao chamador (a rota não pode dizer que deu certo) para que
+    // o lojista veja o erro e solicite um novo link de recuperação.
+    console.error(
+      '[RecuperacaoSenha] Token marcado como usado, mas falhou ao gravar a nova senha:',
+      erroSenha,
+    );
     return false;
-  }
-
-  const { error: erroMarcarUsado } = await supabaseAdmin
-    .from('tokens_recuperacao')
-    .update({ usado_em: new Date().toISOString() })
-    .eq('id', linha.id);
-
-  if (erroMarcarUsado) {
-    // A senha já foi trocada com sucesso; deixar de marcar o token como
-    // usado é uma falha secundária, mas o objetivo da chamada (redefinir
-    // a senha) foi cumprido — continua reportando sucesso ao chamador.
-    console.error('[RecuperacaoSenha] Erro ao marcar token como usado:', erroMarcarUsado);
   }
 
   return true;
