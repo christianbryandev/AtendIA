@@ -29,9 +29,11 @@ import { webhookStripeHandler } from './services/billing/webhook-route.js';
 import { CREDITOS_DA_COTA } from './services/billing/cota.js';
 import { reconciliarSePreciso } from './services/billing/status.js';
 import { gravarMensagem, ultimasMensagens } from './services/conversas/mensagem-repo.js';
-import { buscarConversa, registrarMensagemDoCliente, registrarMensagemNossa, definirControleHumano } from './services/conversas/conversa-repo.js';
+import { buscarConversa, registrarMensagemDoCliente, registrarMensagemNossa, definirControleHumano, listarConversas } from './services/conversas/conversa-repo.js';
 import { decidirAtendimento, montarHistoricoParaIA } from './services/conversas/fluxo-webhook.js';
-import { salvarAudioDaMeta } from './services/whatsapp/audio-storage.js';
+import { enviarMensagemDoLojista } from './services/conversas/envio.js';
+import { calcularJanela } from './services/conversas/janela.js';
+import { salvarAudioDaMeta, urlAssinadaDoAudio } from './services/whatsapp/audio-storage.js';
 import {
   listarCardapio,
   criarCategoria,
@@ -1141,6 +1143,118 @@ app.post('/api/whatsapp/conexao', autenticar, exigirAssinaturaAtiva, async (req,
   } catch (err) {
     console.error('[WhatsApp] Erro ao salvar conexão:', err);
     return res.status(500).json({ error: 'Erro ao salvar a conexão.' });
+  }
+});
+
+// ============================================================
+// ROTAS DA CAIXA DE ENTRADA (ATENDIMENTO)
+// ============================================================
+// A tela do lojista consome estas rotas para ver as conversas e assumir
+// o atendimento na mão quando a IA não dá conta. A checagem da janela de
+// 24h da Meta acontece dentro de enviarMensagemDoLojista, não aqui — é
+// ela que decide se a mensagem pode sair de verdade.
+
+// Lista as conversas do restaurante, com o estado da janela já calculado
+// e o nome do cliente vindo do CRM.
+app.get('/api/atendimento/conversas', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const restauranteId = req.restauranteId!;
+    const conversas = await listarConversas(restauranteId);
+
+    const telefones = conversas.map((c) => c.telefoneCliente);
+    const { data: clientes, error } = await supabaseAdmin
+      .from('clientes_crm')
+      .select('telefone_whatsapp, nome')
+      .eq('restaurante_id', restauranteId)
+      .in('telefone_whatsapp', telefones.length > 0 ? telefones : ['']);
+
+    if (error) throw error;
+
+    const nomePorTelefone = new Map((clientes ?? []).map((c) => [c.telefone_whatsapp, c.nome]));
+
+    const resposta = conversas.map((conversa) => ({
+      ...conversa,
+      nomeCliente: nomePorTelefone.get(conversa.telefoneCliente) ?? null,
+      janela: calcularJanela(conversa.ultimaMensagemClienteEm),
+    }));
+
+    return res.json({ conversas: resposta });
+  } catch (err) {
+    console.error('[Atendimento] Erro ao listar conversas:', err);
+    return res.status(500).json({ error: 'Erro ao buscar as conversas.' });
+  }
+});
+
+// Histórico de mensagens de uma conversa, com URL assinada para os áudios.
+app.get('/api/atendimento/conversas/:telefone/mensagens', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const restauranteId = req.restauranteId!;
+    const telefone = req.params.telefone;
+
+    const { data: mensagens, error } = await supabaseAdmin
+      .from('mensagens')
+      .select('id, direcao, autor, tipo, texto, transcricao, audio_url, status, erro_envio, created_at')
+      .eq('restaurante_id', restauranteId)
+      .eq('telefone_cliente', telefone)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    const comAudio = await Promise.all(
+      (mensagens ?? []).map(async (m) => ({
+        ...m,
+        audioUrlAssinada: m.tipo === 'audio' && m.audio_url ? await urlAssinadaDoAudio(m.audio_url) : null,
+      })),
+    );
+
+    return res.json({ mensagens: comAudio });
+  } catch (err) {
+    console.error('[Atendimento] Erro ao buscar histórico da conversa:', err);
+    return res.status(500).json({ error: 'Erro ao buscar o histórico da conversa.' });
+  }
+});
+
+// Envia uma mensagem escrita pelo lojista. A trava da janela de 24h da
+// Meta acontece dentro de enviarMensagemDoLojista.
+app.post('/api/atendimento/conversas/:telefone/mensagens', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const restauranteId = req.restauranteId!;
+    const telefone = String(req.params.telefone);
+    const { texto } = req.body;
+
+    if (!texto || typeof texto !== 'string' || !texto.trim()) {
+      return res.status(400).json({ error: 'Informe o texto da mensagem.' });
+    }
+
+    const resultado = await enviarMensagemDoLojista(restauranteId, telefone, texto.trim());
+
+    if (!resultado.ok) {
+      return res.status(400).json({ error: resultado.erro });
+    }
+
+    return res.json({ success: true, id: resultado.id });
+  } catch (err) {
+    console.error('[Atendimento] Erro ao enviar mensagem do lojista:', err);
+    return res.status(500).json({ error: 'Erro ao enviar a mensagem.' });
+  }
+});
+
+// Assume ou devolve o controle humano da conversa.
+app.post('/api/atendimento/conversas/:telefone/controle', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const restauranteId = req.restauranteId!;
+    const telefone = String(req.params.telefone);
+    const { humano } = req.body;
+
+    if (typeof humano !== 'boolean') {
+      return res.status(400).json({ error: 'Informe o campo "humano" como booleano.' });
+    }
+
+    await definirControleHumano(restauranteId, telefone, humano);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[Atendimento] Erro ao definir o controle da conversa:', err);
+    return res.status(500).json({ error: 'Erro ao atualizar o controle da conversa.' });
   }
 });
 
