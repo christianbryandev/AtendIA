@@ -84,7 +84,11 @@ describe('Cardapio', () => {
     });
   });
 
-  it('recusa preço inválido (zero, negativo ou texto) antes de chamar a API, com mensagem em português', async () => {
+  it.each([
+    ['zero', '0'],
+    ['negativo', '-5'],
+    ['texto', 'abc'],
+  ])('recusa preço inválido (%s) antes de chamar a API, com mensagem em português', async (_descricao, valorPreco) => {
     const user = userEvent.setup();
     stubFetch(async () => respostaJson(CARDAPIO_COM_ITENS));
     montar();
@@ -92,7 +96,7 @@ describe('Cardapio', () => {
     await screen.findByText('Pizzas');
 
     await user.type(screen.getByLabelText(/nome do produto/i), 'Refrigerante');
-    await user.type(screen.getByLabelText(/preço/i), '0');
+    await user.type(screen.getByLabelText(/preço/i), valorPreco);
     await user.click(screen.getByRole('button', { name: /criar produto/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/preço/i);
@@ -164,5 +168,61 @@ describe('Cardapio', () => {
     expect(chamadasRemover).toHaveLength(0);
 
     confirmSpy.mockRestore();
+  });
+
+  it('mostra a mensagem do backend ao tentar remover categoria com produto associado', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    stubFetch(async (url: string, opts?: RequestInit) => {
+      if (String(url).includes('/cardapio/categorias/cat-1') && opts?.method === 'DELETE') {
+        return respostaJson({ error: 'Não é possível remover uma categoria que ainda tem produtos.' }, false);
+      }
+      return respostaJson(CARDAPIO_COM_ITENS);
+    });
+    montar();
+
+    await screen.findByText('Pizzas');
+    await user.click(screen.getByRole('button', { name: /remover categoria/i }));
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Não é possível remover uma categoria que ainda tem produtos.',
+    );
+    // A categoria continua na tela: a remoção foi recusada pelo backend.
+    expect(screen.getByText('Pizzas')).toBeInTheDocument();
+
+    confirmSpy.mockRestore();
+  });
+
+  it('mostra a mensagem do backend quando a criação do produto é recusada', async () => {
+    const user = userEvent.setup();
+    stubFetch(async (url: string, opts?: RequestInit) => {
+      if (String(url).includes('/cardapio/produtos') && opts?.method === 'POST') {
+        return respostaJson({ error: 'Já existe um produto com esse nome nesta categoria.' }, false);
+      }
+      return respostaJson(CARDAPIO_COM_ITENS);
+    });
+    montar();
+
+    await screen.findByText('Pizzas');
+    await user.type(screen.getByLabelText(/nome do produto/i), 'Marguerita');
+    await user.type(screen.getByLabelText(/preço/i), '45,90');
+    await user.click(screen.getByRole('button', { name: /criar produto/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Já existe um produto com esse nome nesta categoria.',
+    );
+  });
+
+  it('mostra aviso de cardápio vazio quando há categorias mas nenhum produto cadastrado', async () => {
+    stubFetch(async () =>
+      respostaJson({ categorias: [{ id: 'cat-1', nome: 'Pizzas', ordem: 0, produtos: [] }] }),
+    );
+    montar();
+
+    await screen.findByText('Pizzas');
+    const aviso = await screen.findByText(/cardápio.*vazio/i);
+    expect(aviso).toBeInTheDocument();
+    expect(aviso.closest('[role="status"]')).toHaveTextContent(/atender.*whatsapp|whatsapp.*atender/i);
   });
 });

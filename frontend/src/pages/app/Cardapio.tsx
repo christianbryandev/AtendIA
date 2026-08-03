@@ -204,7 +204,10 @@ export default function Cardapio() {
     }
   };
 
-  const cardapioVazio = !carregando && categorias.length === 0;
+  // Vazio tanto sem categorias quanto com categorias mas sem nenhum produto:
+  // nos dois casos a IA fica sem o que oferecer no atendimento.
+  const cardapioVazio =
+    !carregando && categorias.every((categoria) => categoria.produtos.length === 0);
 
   return (
     <Container className="py-12">
