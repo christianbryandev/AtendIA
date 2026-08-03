@@ -12,9 +12,25 @@ import { createClient } from '@supabase/supabase-js';
  * mensagem escapar das checagens de janela, crédito e token.
  */
 export function criarClienteSupabase(token: string) {
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+  // VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY só entram no bundle em um
+  // novo build (variáveis VITE_ são injetadas em build time). Sem esta
+  // checagem, esquecer de configurá-las no ambiente de build faria o
+  // createClient falhar com uma exceção crua e difícil de rastrear só
+  // quando o navegador tentasse usar o cliente, bem longe de onde a causa
+  // realmente está.
+  if (!url || !anonKey) {
+    throw new Error(
+      'Configuração ausente: VITE_SUPABASE_URL e/ou VITE_SUPABASE_ANON_KEY não foram definidas no build do frontend. ' +
+        'Verifique as variáveis de ambiente usadas no build (elas precisam existir ANTES de rodar o build, não em runtime).',
+    );
+  }
+
   return createClient(
-    import.meta.env.VITE_SUPABASE_URL,
-    import.meta.env.VITE_SUPABASE_ANON_KEY,
+    url,
+    anonKey,
     {
       global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { persistSession: false, autoRefreshToken: false },

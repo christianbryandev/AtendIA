@@ -19,10 +19,6 @@ import { getJwtSecret } from '../config/env.js';
 // migration 009).
 const NOME_FIXTURE = '__FIXTURE_TASK8_ISOLAMENTO_REALTIME_NAO_APAGAR_MANUALMENTE__';
 
-// Todo id de restaurante-fixture criado nesta suíte, para o afterAll
-// conseguir limpar mesmo que algo falhe no meio do beforeAll.
-const idsRestaurantesCriados: string[] = [];
-
 let restauranteAId: string;
 let restauranteBId: string;
 let clienteComoA: ReturnType<typeof getTenantSupabaseClient>;
@@ -35,9 +31,7 @@ async function criarRestauranteFixture(sufixo: string) {
     .single();
 
   if (error) throw error;
-  const id = data.id as string;
-  idsRestaurantesCriados.push(id);
-  return id;
+  return data.id as string;
 }
 
 // Assina o JWT com o MESMO formato que a rota /api/auth/login usa (ver
@@ -104,7 +98,19 @@ beforeAll(async () => {
 afterAll(async () => {
   const ids = [restauranteAId, restauranteBId].filter(Boolean);
   if (ids.length > 0) {
-    await supabaseAdmin.from('restaurantes').delete().in('id', ids);
+    const { error } = await supabaseAdmin.from('restaurantes').delete().in('id', ids);
+    // O cliente do Supabase não lança sozinho: se o delete falhar aqui e o
+    // erro for descartado, as fixtures (e conversas/mensagens em cascata)
+    // ficam para sempre no banco real, e a suíte continua verde do mesmo
+    // jeito. Torna a falha visível e barulhenta.
+    if (error) {
+      console.error(
+        'FALHA AO LIMPAR FIXTURES DO TESTE isolamento-realtime — restaurantes de fixture podem ter ficado no banco real:',
+        ids,
+        error,
+      );
+      throw error;
+    }
   }
 });
 
@@ -125,6 +131,11 @@ describe('isolamento de RLS entre restaurantes (mensagens e conversas)', () => {
     // isto retornaria as mensagens dos dois restaurantes.
     const { data: todas, error: erroTodas } = await clienteComoA.from('mensagens').select('*');
     expect(erroTodas).toBeNull();
+    // Garante que a lista não está vazia antes do every: uma lista vazia
+    // passaria no every trivialmente e a asserção não provaria nada,
+    // inclusive ficando frágil a uma reordenação futura dos testes que
+    // rodasse esta verificação antes da fixture existir.
+    expect(todas?.length).toBeGreaterThan(0);
     expect(todas?.every((m) => m.restaurante_id === restauranteAId)).toBe(true);
 
     // Pede filtrando explicitamente por B: a RLS deve zerar o resultado antes
@@ -151,6 +162,9 @@ describe('isolamento de RLS entre restaurantes (mensagens e conversas)', () => {
   it('A NÃO lê nenhuma conversa de B, mesmo pedindo explicitamente', async () => {
     const { data: todas, error: erroTodas } = await clienteComoA.from('conversas').select('*');
     expect(erroTodas).toBeNull();
+    // Mesma razão do teste equivalente em mensagens: lista vazia não prova
+    // isolamento nenhum.
+    expect(todas?.length).toBeGreaterThan(0);
     expect(todas?.every((c) => c.restaurante_id === restauranteAId)).toBe(true);
 
     const { data: deB, error: erroDeB } = await clienteComoA
@@ -159,5 +173,85 @@ describe('isolamento de RLS entre restaurantes (mensagens e conversas)', () => {
       .eq('restaurante_id', restauranteBId);
     expect(erroDeB).toBeNull();
     expect(deB).toHaveLength(0);
+  });
+
+  // ------------------------------------------------------------
+  // Achado 1/2 da revisão da Task 8: as policies da migration 009 são
+  // FOR ALL com só USING, o que em Postgres faz o WITH CHECK herdar a
+  // mesma expressão do USING — ou seja, hoje o mesmo JWT que lê também
+  // teria permissão de INSERT/UPDATE. Isso quebraria a promessa de
+  // "só leitura" documentada em frontend/src/services/supabase.ts: um
+  // lojista poderia, pelo console do navegador, adulterar
+  // conversas.ultima_mensagem_cliente_em do próprio restaurante e
+  // enganar o cálculo da janela de 24h da Meta.
+  //
+  // ATENÇÃO: os testes abaixo só passam DEPOIS que a migration 011
+  // (011_realtime_somente_leitura.sql) for aplicada no Supabase real,
+  // trocando as policies FOR ALL por FOR SELECT. Antes disso eles
+  // FALHAM de propósito — a falha é a prova de que o achado é real e de
+  // que a migration 011 é necessária. Não marcar como skip nem
+  // enfraquecer para "ficar verde": um resultado verde aqui hoje
+  // significaria que a escrita direta pelo navegador ainda é possível.
+  describe('escrita direta pelo navegador deve ser bloqueada (vale após a migration 011)', () => {
+    it('A NÃO consegue inserir mensagem, nem com o próprio restaurante_id', async () => {
+      const { error } = await clienteComoA.from('mensagens').insert([
+        {
+          restaurante_id: restauranteAId,
+          telefone_cliente: '5511900000001',
+          direcao: 'enviada',
+          autor: 'lojista',
+          texto: 'tentativa de escrita direta pelo navegador',
+        },
+      ]);
+
+      expect(error).not.toBeNull();
+    });
+
+    it('A NÃO consegue atualizar a própria conversa (caso concreto: adulterar ultima_mensagem_cliente_em para forçar a janela de 24h como aberta)', async () => {
+      const { error, data } = await clienteComoA
+        .from('conversas')
+        .update({ ultima_mensagem_cliente_em: new Date().toISOString() })
+        .eq('restaurante_id', restauranteAId)
+        .select();
+
+      // Dependendo da policy, o Postgres pode tanto recusar com erro quanto
+      // silenciosamente não afetar nenhuma linha (RLS filtra as linhas
+      // visíveis para UPDATE antes de aplicar o WITH CHECK). Qualquer um
+      // dos dois é aceitável como prova de bloqueio; o que NÃO pode
+      // acontecer é a linha ser efetivamente alterada.
+      if (error) {
+        expect(error).not.toBeNull();
+      } else {
+        expect(data ?? []).toHaveLength(0);
+      }
+    });
+
+    it('A NÃO consegue inserir mensagem em nome de B', async () => {
+      const { error } = await clienteComoA.from('mensagens').insert([
+        {
+          restaurante_id: restauranteBId,
+          telefone_cliente: '5511900000002',
+          direcao: 'enviada',
+          autor: 'lojista',
+          texto: 'tentativa de escrita cross-tenant',
+        },
+      ]);
+
+      expect(error).not.toBeNull();
+    });
+
+    it('A NÃO consegue atualizar conversa de B', async () => {
+      const { error, data } = await clienteComoA
+        .from('conversas')
+        .update({ ultima_mensagem_cliente_em: new Date().toISOString() })
+        .eq('restaurante_id', restauranteBId)
+        .select();
+
+      if (error) {
+        expect(error).not.toBeNull();
+      } else {
+        expect(data ?? []).toHaveLength(0);
+      }
+    });
   });
 });
