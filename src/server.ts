@@ -32,6 +32,15 @@ import { gravarMensagem, ultimasMensagens } from './services/conversas/mensagem-
 import { buscarConversa, registrarMensagemDoCliente, registrarMensagemNossa, definirControleHumano } from './services/conversas/conversa-repo.js';
 import { decidirAtendimento, montarHistoricoParaIA } from './services/conversas/fluxo-webhook.js';
 import { salvarAudioDaMeta } from './services/whatsapp/audio-storage.js';
+import {
+  listarCardapio,
+  criarCategoria,
+  atualizarCategoria,
+  removerCategoria,
+  criarProduto,
+  atualizarProduto,
+  removerProduto,
+} from './services/cardapio/cardapio-repo.js';
 
 const app = express();
 
@@ -966,6 +975,130 @@ app.put('/api/pdv/pedidos/:id/status', autenticar, exigirAssinaturaAtiva, async 
   } catch (err: any) {
     console.error(err);
     return res.status(500).json({ error: 'Erro ao atualizar status do pedido' });
+  }
+});
+
+// ============================================================
+// ROTAS DE CARDÁPIO (CATEGORIAS E PRODUTOS)
+// ============================================================
+
+// Preço precisa ser positivo e ter no máximo duas casas decimais, senão
+// o valor cobrado do cliente diverge do exibido no cardápio.
+function precoValido(preco: unknown): preco is number {
+  if (typeof preco !== 'number' || !Number.isFinite(preco) || preco <= 0) return false;
+  return Math.round(preco * 100) === preco * 100;
+}
+
+app.get('/api/cardapio', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const categorias = await listarCardapio(req.restauranteId!);
+    return res.json({ categorias });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao listar cardápio:', err);
+    return res.status(500).json({ error: 'Erro ao buscar o cardápio.' });
+  }
+});
+
+app.post('/api/cardapio/categorias', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const { nome, ordem } = req.body;
+    if (!nome || typeof nome !== 'string' || !nome.trim()) {
+      return res.status(400).json({ error: 'Nome da categoria é obrigatório.' });
+    }
+
+    const categoria = await criarCategoria(req.restauranteId!, nome.trim(), ordem ?? 0);
+    return res.status(201).json({ categoria });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao criar categoria:', err);
+    return res.status(500).json({ error: 'Erro ao criar a categoria.' });
+  }
+});
+
+app.put('/api/cardapio/categorias/:id', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const categoriaId = req.params.id as string;
+    const { nome, ordem } = req.body;
+    if (nome !== undefined && (typeof nome !== 'string' || !nome.trim())) {
+      return res.status(400).json({ error: 'Nome da categoria inválido.' });
+    }
+
+    await atualizarCategoria(req.restauranteId!, categoriaId, { nome: nome?.trim(), ordem });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao atualizar categoria:', err);
+    return res.status(500).json({ error: 'Erro ao atualizar a categoria.' });
+  }
+});
+
+app.delete('/api/cardapio/categorias/:id', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const categoriaId = req.params.id as string;
+    await removerCategoria(req.restauranteId!, categoriaId);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Cardápio] Erro ao remover categoria:', err);
+    return res.status(400).json({ error: err.message || 'Erro ao remover a categoria.' });
+  }
+});
+
+app.post('/api/cardapio/produtos', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const { categoriaId, nome, descricao, preco, ordem } = req.body;
+    if (!nome || typeof nome !== 'string' || !nome.trim()) {
+      return res.status(400).json({ error: 'Nome do produto é obrigatório.' });
+    }
+    if (!precoValido(preco)) {
+      return res.status(400).json({ error: 'Preço inválido: deve ser um número positivo com no máximo duas casas decimais.' });
+    }
+
+    const produto = await criarProduto(req.restauranteId!, {
+      categoriaId: categoriaId ?? null,
+      nome: nome.trim(),
+      descricao: descricao ?? null,
+      preco,
+      ordem: ordem ?? 0,
+    });
+    return res.status(201).json({ produto });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao criar produto:', err);
+    return res.status(500).json({ error: 'Erro ao criar o produto.' });
+  }
+});
+
+app.put('/api/cardapio/produtos/:id', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const produtoId = req.params.id as string;
+    const { categoriaId, nome, descricao, preco, disponivel, ordem } = req.body;
+    if (nome !== undefined && (typeof nome !== 'string' || !nome.trim())) {
+      return res.status(400).json({ error: 'Nome do produto inválido.' });
+    }
+    if (preco !== undefined && !precoValido(preco)) {
+      return res.status(400).json({ error: 'Preço inválido: deve ser um número positivo com no máximo duas casas decimais.' });
+    }
+
+    await atualizarProduto(req.restauranteId!, produtoId, {
+      categoriaId,
+      nome: nome?.trim(),
+      descricao,
+      preco,
+      disponivel,
+      ordem,
+    });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao atualizar produto:', err);
+    return res.status(500).json({ error: 'Erro ao atualizar o produto.' });
+  }
+});
+
+app.delete('/api/cardapio/produtos/:id', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const produtoId = req.params.id as string;
+    await removerProduto(req.restauranteId!, produtoId);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao remover produto:', err);
+    return res.status(500).json({ error: 'Erro ao remover o produto.' });
   }
 });
 
