@@ -17,7 +17,7 @@ import { corsOptions } from './config/cors.js';
 import { supabase, supabaseAdmin, getTenantSupabaseClient } from './config/supabase.js';
 import { transcribeAudioWithGroq } from './services/ai/groq-stt.js';
 import { processCustomerMessageWithAI } from './services/ai/openai-agent.js';
-import { sendWhatsAppTextMessage, downloadWhatsAppMedia } from './services/whatsapp/meta-cloud-api.js';
+import { sendWhatsAppTextMessage } from './services/whatsapp/meta-cloud-api.js';
 import { upsertCustomerInCRM, runReactivationCampaign } from './services/crm/reactivation.js';
 import { importarCardapioiFood } from './services/ifood/ifood-api.js';
 import { decrypt } from './utils/crypto.js';
@@ -30,7 +30,7 @@ import { CREDITOS_DA_COTA } from './services/billing/cota.js';
 import { reconciliarSePreciso } from './services/billing/status.js';
 import { gravarMensagem, ultimasMensagens } from './services/conversas/mensagem-repo.js';
 import { buscarConversa, registrarMensagemDoCliente, registrarMensagemNossa, definirControleHumano } from './services/conversas/conversa-repo.js';
-import { decidirAtendimento } from './services/conversas/fluxo-webhook.js';
+import { decidirAtendimento, montarHistoricoParaIA } from './services/conversas/fluxo-webhook.js';
 import { salvarAudioDaMeta } from './services/whatsapp/audio-storage.js';
 
 const app = express();
@@ -159,9 +159,14 @@ app.post('/webhook/whatsapp', (req, res) => {
           const agoraIso = new Date().toISOString();
           const audioId = message.audio?.id;
           let audioCaminho: string | null = null;
+          // Guarda o buffer já baixado para reaproveitar na transcrição
+          // logo abaixo, em vez de baixar o mesmo áudio da Meta de novo.
+          let audioBufferBaixado: Buffer | null = null;
 
           if (messageType === 'audio' && audioId) {
-            audioCaminho = await salvarAudioDaMeta(audioId, metaToken, restauranteId);
+            const resultado = await salvarAudioDaMeta(audioId, metaToken, restauranteId);
+            audioCaminho = resultado.caminho;
+            audioBufferBaixado = resultado.buffer;
           }
 
           const idMensagemCliente = await gravarMensagem({
@@ -221,10 +226,12 @@ app.post('/webhook/whatsapp', (req, res) => {
             let textoEntrada = '';
 
             if (messageType === 'audio') {
-              console.log(`[Áudio Assíncrono] De: ${fromPhone} | Baixando da Meta e Transcrevendo...`);
-              if (audioId) {
-                const audioBuffer = await downloadWhatsAppMedia(audioId, metaToken);
-                textoEntrada = await transcribeAudioWithGroq(audioBuffer, 'audio.ogg');
+              console.log(`[Áudio Assíncrono] De: ${fromPhone} | Transcrevendo...`);
+              // Reaproveita o buffer baixado em salvarAudioDaMeta (acima) em vez de
+              // baixar o mesmo áudio da Meta de novo — evita dobrar a latência do
+              // atendimento por áudio e uma segunda dependência do link que expira.
+              if (audioBufferBaixado) {
+                textoEntrada = await transcribeAudioWithGroq(audioBufferBaixado, 'audio.ogg');
 
                 if (idMensagemCliente && textoEntrada) {
                   await supabaseAdmin
@@ -248,22 +255,17 @@ app.post('/webhook/whatsapp', (req, res) => {
 
               const historico = await ultimasMensagens(restauranteId, fromPhone, 20);
 
-              // Filtra o histórico removendo a mensagem que acabou de ser gravada,
-              // pois ela será adicionada separadamente como mensagemTexto. Sem esse
-              // filtro, a mensagem atual do cliente apareceria duplicada no histórico
-              // enviado ao modelo (dois turnos 'user' idênticos consecutivos).
-              const historicoSemDuplicata = historico.filter((m) => m.id !== idMensagemCliente);
+              // Remove a mensagem atual (já será enviada separadamente como
+              // mensagemTexto) e converte para o formato que a IA espera.
+              // Lógica extraída para montarHistoricoParaIA por ser testável
+              // sem subir servidor nem simular a Meta.
+              const historicoParaIA = montarHistoricoParaIA(historico, idMensagemCliente);
 
               const { respostaTexto } = await processCustomerMessageWithAI({
                 restauranteId,
                 telefoneCliente: fromPhone,
                 mensagemTexto: textoEntrada,
-                historicoConversa: historicoSemDuplicata
-                  .map((m) => ({
-                    role: m.autor === 'cliente' ? ('user' as const) : ('assistant' as const),
-                    content: m.transcricao ?? m.texto ?? '',
-                  }))
-                  .filter((m) => m.content.length > 0),
+                historicoConversa: historicoParaIA,
               });
 
               await sendWhatsAppTextMessage({

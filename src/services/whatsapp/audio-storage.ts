@@ -3,6 +3,11 @@ import { downloadWhatsAppMedia } from './meta-cloud-api.js';
 
 const BUCKET = 'audios-whatsapp';
 
+export interface ResultadoSalvarAudio {
+  caminho: string | null;
+  buffer: Buffer | null;
+}
+
 /**
  * Baixa o áudio da Meta e guarda no Supabase Storage.
  *
@@ -11,16 +16,33 @@ const BUCKET = 'audios-whatsapp';
  * áudio se perde. O bucket é privado; a leitura acontece por URL
  * assinada, gerada sob demanda pela nossa API.
  *
- * Devolve null em caso de falha, de propósito: perder o áudio não pode
- * impedir o atendimento. A transcrição já basta para a IA responder.
+ * Devolve também o buffer baixado para quem chamou reaproveitar (ex.: a
+ * transcrição), evitando baixar o mesmo áudio da Meta duas vezes — o que
+ * dobraria a latência do atendimento por áudio e criaria uma segunda
+ * dependência do link que expira rápido.
+ *
+ * Devolve caminho e buffer null em caso de falha ao BAIXAR, de propósito:
+ * perder o áudio não pode impedir o atendimento.
+ *
+ * Se o download funcionar mas o Storage falhar (ex.: bucket ainda não
+ * criado), o caminho fica null mas o buffer baixado é devolvido mesmo
+ * assim — a transcrição precisa continuar funcionando mesmo sem o áudio
+ * guardado.
  */
 export async function salvarAudioDaMeta(
   mediaId: string,
   token: string,
   restauranteId: string,
-): Promise<string | null> {
+): Promise<ResultadoSalvarAudio> {
+  let buffer: Buffer;
   try {
-    const buffer = await downloadWhatsAppMedia(mediaId, token);
+    buffer = await downloadWhatsAppMedia(mediaId, token);
+  } catch (erro) {
+    console.error('[Audio] Falha ao baixar da Meta:', erro);
+    return { caminho: null, buffer: null };
+  }
+
+  try {
     const caminho = `${restauranteId}/${mediaId}.ogg`;
 
     const { error } = await supabaseAdmin.storage
@@ -29,13 +51,13 @@ export async function salvarAudioDaMeta(
 
     if (error) {
       console.error('[Audio] Falha ao guardar no Storage:', error.message);
-      return null;
+      return { caminho: null, buffer };
     }
 
-    return caminho;
+    return { caminho, buffer };
   } catch (erro) {
-    console.error('[Audio] Falha ao baixar da Meta:', erro);
-    return null;
+    console.error('[Audio] Falha ao guardar no Storage:', erro);
+    return { caminho: null, buffer };
   }
 }
 

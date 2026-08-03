@@ -52,3 +52,35 @@ export function decidirAtendimento(
 
   return { iaResponde: false, devolverControle: false };
 }
+
+export interface MensagemDoHistorico {
+  id: string;
+  autor: string;
+  texto: string | null;
+  transcricao: string | null;
+}
+
+export type MensagemParaIA = { role: 'user' | 'assistant'; content: string };
+
+/**
+ * Monta o histórico no formato que a IA espera, a partir das mensagens
+ * gravadas no banco.
+ *
+ * Remove a mensagem atual pelo id porque ela é enviada separadamente como
+ * mensagemTexto — sem essa remoção, a IA veria o turno atual do cliente
+ * duplicado no histórico. Extraído do webhook (que ficou grande demais)
+ * para ser testável sem subir servidor nem simular a Meta, no mesmo
+ * espírito de decidirAtendimento.
+ */
+export function montarHistoricoParaIA(
+  historico: MensagemDoHistorico[],
+  idMensagemAtual: string,
+): MensagemParaIA[] {
+  return historico
+    .filter((m) => m.id !== idMensagemAtual)
+    .map((m) => ({
+      role: m.autor === 'cliente' ? ('user' as const) : ('assistant' as const),
+      content: m.transcricao ?? m.texto ?? '',
+    }))
+    .filter((m) => m.content.length > 0);
+}
