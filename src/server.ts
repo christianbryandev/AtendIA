@@ -28,6 +28,8 @@ import { criarSessaoAssinatura, criarSessaoPacote, criarSessaoPortal } from './s
 import { webhookStripeHandler } from './services/billing/webhook-route.js';
 import { CREDITOS_DA_COTA } from './services/billing/cota.js';
 import { reconciliarSePreciso } from './services/billing/status.js';
+import { avisarCotaEsgotadaSeNecessario } from './services/billing/aviso-cota.js';
+import { gerarTokenRecuperacao, consumirTokenERedefinir } from './services/auth/recuperacao-senha.js';
 import { gravarMensagem, ultimasMensagens } from './services/conversas/mensagem-repo.js';
 import { buscarConversa, registrarMensagemDoCliente, registrarMensagemNossa, definirControleHumano, listarConversas } from './services/conversas/conversa-repo.js';
 import { decidirAtendimento, montarHistoricoParaIA } from './services/conversas/fluxo-webhook.js';
@@ -225,6 +227,15 @@ app.post('/webhook/whatsapp', (req, res) => {
 
           if (erroCreditos || !creditosAprovados) {
             console.log(`[Webhook] Restaurante ${restauranteId} sem créditos suficientes. Abortando IA.`);
+
+            // Só avisa por e-mail quando a RPC respondeu de verdade que o
+            // saldo acabou (creditosAprovados === false). Um erro de
+            // infraestrutura (erroCreditos truthy) não significa que a
+            // cota esgotou, e não deve disparar o aviso.
+            if (!erroCreditos && !creditosAprovados) {
+              await avisarCotaEsgotadaSeNecessario(restauranteId);
+            }
+
             await sendWhatsAppTextMessage({
               toPhoneNumber: fromPhone,
               text: 'Nosso atendimento automático está temporariamente indisponível. Entre em contato diretamente com a loja.',
@@ -578,6 +589,86 @@ app.post('/api/auth/cadastro', async (req, res) => {
   );
 
   return res.status(201).json({ success: true, token, expiresIn: 43200 });
+});
+
+// ------------------------------------------------------------------
+// 3.2.1 RECUPERAÇÃO DE SENHA
+// ------------------------------------------------------------------
+// Nenhuma das duas rotas passa por `autenticar`: quem esqueceu a senha,
+// por definição, não tem sessão.
+
+// Limite de tentativas por e-mail, em memória: sem isso o formulário de
+// "esqueci minha senha" vira uma ferramenta de spam contra os próprios
+// clientes, disparando e-mail de recuperação repetidamente para o
+// mesmo endereço. O backend roda como um processo só, então perder
+// esse estado num restart é inofensivo — o pior caso é a janela de
+// limite reabrir mais cedo.
+const LIMITE_TENTATIVAS_RECUPERACAO = 3;
+const JANELA_TENTATIVAS_RECUPERACAO_MS = 15 * 60 * 1000; // 15 minutos
+const tentativasRecuperacaoPorEmail = new Map<string, { contagem: number; desde: number }>();
+
+function podeTentarRecuperacao(email: string): boolean {
+  const agora = Date.now();
+  const chave = email.trim().toLowerCase();
+  const registro = tentativasRecuperacaoPorEmail.get(chave);
+
+  if (!registro || agora - registro.desde >= JANELA_TENTATIVAS_RECUPERACAO_MS) {
+    tentativasRecuperacaoPorEmail.set(chave, { contagem: 1, desde: agora });
+    return true;
+  }
+
+  if (registro.contagem >= LIMITE_TENTATIVAS_RECUPERACAO) {
+    return false;
+  }
+
+  registro.contagem += 1;
+  return true;
+}
+
+// Resposta idêntica exista a conta ou não — mesmo cuidado já adotado no
+// login (e-mail ou senha inválidos, sem dizer qual) e no CNPJ duplicado
+// do cadastro. Sem isso, qualquer pessoa descobre quais e-mails são
+// clientes testando um por um.
+const MENSAGEM_ESQUECI_SENHA = 'Se este e-mail estiver cadastrado, você receberá as instruções.';
+
+app.post('/api/auth/esqueci-senha', async (req, res) => {
+  const { email } = req.body;
+
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ success: false, error: 'E-mail é obrigatório.' });
+  }
+
+  // O limite de tentativas também não pode vazar informação: quando
+  // excedido, simplesmente pula a geração do token e devolve a mesma
+  // resposta de sempre.
+  if (podeTentarRecuperacao(email)) {
+    await gerarTokenRecuperacao(email);
+  }
+
+  return res.json({ success: true, message: MENSAGEM_ESQUECI_SENHA });
+});
+
+app.post('/api/auth/redefinir-senha', async (req, res) => {
+  const { token, senha } = req.body;
+
+  if (!token || typeof token !== 'string' || !senha || typeof senha !== 'string') {
+    return res.status(400).json({ success: false, error: 'Token e nova senha são obrigatórios.' });
+  }
+
+  if (senha.length < 8) {
+    return res.status(400).json({ success: false, error: 'A senha precisa ter ao menos 8 caracteres.' });
+  }
+
+  const sucesso = await consumirTokenERedefinir(token, senha);
+
+  if (!sucesso) {
+    return res.status(400).json({
+      success: false,
+      error: 'Link inválido ou expirado. Solicite uma nova recuperação de senha.',
+    });
+  }
+
+  return res.json({ success: true, message: 'Senha redefinida com sucesso.' });
 });
 
 // ------------------------------------------------------------------
