@@ -9,6 +9,7 @@ export interface Assinatura {
   stripeSubscriptionId: string | null;
   status: StatusAssinatura;
   periodoFim: string | null;
+  cancelamentoAgendadoPara: string | null;
 }
 
 interface LinhaAssinatura {
@@ -17,9 +18,11 @@ interface LinhaAssinatura {
   stripe_subscription_id: string | null;
   status: StatusAssinatura;
   periodo_fim: string | null;
+  cancelamento_agendado_para: string | null;
 }
 
-const COLUNAS = 'restaurante_id, stripe_customer_id, stripe_subscription_id, status, periodo_fim';
+const COLUNAS =
+  'restaurante_id, stripe_customer_id, stripe_subscription_id, status, periodo_fim, cancelamento_agendado_para';
 
 function paraDominio(linha: LinhaAssinatura): Assinatura {
   return {
@@ -28,6 +31,7 @@ function paraDominio(linha: LinhaAssinatura): Assinatura {
     stripeSubscriptionId: linha.stripe_subscription_id,
     status: linha.status,
     periodoFim: linha.periodo_fim,
+    cancelamentoAgendadoPara: linha.cancelamento_agendado_para ?? null,
   };
 }
 
@@ -62,7 +66,7 @@ export async function salvarCustomerId(restauranteId: string, customerId: string
 
 export async function atualizarStatus(
   restauranteId: string,
-  campos: Partial<Pick<Assinatura, 'status' | 'stripeSubscriptionId' | 'periodoFim'>> & { canceladaEm?: string },
+  campos: Partial<Pick<Assinatura, 'status' | 'stripeSubscriptionId' | 'periodoFim' | 'cancelamentoAgendadoPara'>> & { canceladaEm?: string },
 ): Promise<void> {
   const linha: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
@@ -70,6 +74,7 @@ export async function atualizarStatus(
   if (campos.stripeSubscriptionId !== undefined) linha.stripe_subscription_id = campos.stripeSubscriptionId;
   if (campos.periodoFim !== undefined) linha.periodo_fim = campos.periodoFim;
   if (campos.canceladaEm !== undefined) linha.cancelada_em = campos.canceladaEm;
+  if (campos.cancelamentoAgendadoPara !== undefined) linha.cancelamento_agendado_para = campos.cancelamentoAgendadoPara;
 
   const { error } = await supabaseAdmin
     .from('assinaturas')

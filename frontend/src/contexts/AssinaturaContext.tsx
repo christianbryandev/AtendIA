@@ -10,6 +10,7 @@ interface EstadoAssinatura {
   creditosCota: number;
   creditosAvulsos: number;
   cotaTotal: number;
+  cancelamentoAgendadoPara: string | null;
   carregando: boolean;
   recarregar: () => Promise<void>;
 }
@@ -20,6 +21,7 @@ const ESTADO_INICIAL: EstadoAssinatura = {
   creditosCota: 0,
   creditosAvulsos: 0,
   cotaTotal: 10000,
+  cancelamentoAgendadoPara: null,
   carregando: true,
   recarregar: async () => {},
 };
@@ -46,6 +48,7 @@ export function AssinaturaProvider({ children }: { children: React.ReactNode }) 
         creditosCota: dados.creditosCota,
         creditosAvulsos: dados.creditosAvulsos,
         cotaTotal: dados.cotaTotal,
+        cancelamentoAgendadoPara: dados.cancelamentoAgendadoPara,
         carregando: false,
       }));
     } catch {

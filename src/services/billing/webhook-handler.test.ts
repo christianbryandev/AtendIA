@@ -249,6 +249,91 @@ describe('customer.subscription.deleted', () => {
   });
 });
 
+describe('customer.subscription.updated', () => {
+  // Cancelamento pelo Customer Portal costuma ser AGENDADO: a
+  // subscription continua active e ganha cancel_at, sem
+  // customer.subscription.deleted disparar na hora.
+  it('com cancel_at preenchido, registra a data do cancelamento agendado e NAO muda o status', async () => {
+    await processarEvento({
+      id: 'evt_upd_1',
+      type: 'customer.subscription.updated',
+      data: {
+        object: {
+          id: 'sub_1',
+          customer: 'cus_1',
+          status: 'active',
+          cancel_at: 1793491200,
+          items: { data: [{ current_period_end: 1793491200 }] },
+        },
+      },
+    } as any);
+
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({
+      cancelamentoAgendadoPara: new Date(1793491200 * 1000).toISOString(),
+    }));
+    const chamada = atualizarStatusMock.mock.calls[0][1];
+    expect(chamada.status).toBeUndefined();
+  });
+
+  it('com cancel_at vazio, limpa o agendamento (lojista reativou pelo portal)', async () => {
+    await processarEvento({
+      id: 'evt_upd_2',
+      type: 'customer.subscription.updated',
+      data: {
+        object: {
+          id: 'sub_1',
+          customer: 'cus_1',
+          status: 'active',
+          cancel_at: null,
+          items: { data: [{ current_period_end: 1793491200 }] },
+        },
+      },
+    } as any);
+
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({
+      cancelamentoAgendadoPara: null,
+    }));
+  });
+
+  it('nao mexe em nenhum credito', async () => {
+    await processarEvento({
+      id: 'evt_upd_3',
+      type: 'customer.subscription.updated',
+      data: {
+        object: {
+          id: 'sub_1',
+          customer: 'cus_1',
+          status: 'active',
+          cancel_at: 1793491200,
+          items: { data: [{ current_period_end: 1793491200 }] },
+        },
+      },
+    } as any);
+
+    expect(rpcMock).not.toHaveBeenCalled();
+  });
+
+  it('atualiza o periodo_fim a partir do estado corrente da subscription', async () => {
+    await processarEvento({
+      id: 'evt_upd_4',
+      type: 'customer.subscription.updated',
+      data: {
+        object: {
+          id: 'sub_1',
+          customer: 'cus_1',
+          status: 'active',
+          cancel_at: null,
+          items: { data: [{ current_period_end: 1800000000 }] },
+        },
+      },
+    } as any);
+
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({
+      periodoFim: new Date(1800000000 * 1000).toISOString(),
+    }));
+  });
+});
+
 describe('charge.refunded', () => {
   // A compra de pacote gera uma Charge do mesmo Customer da assinatura.
   // Sem a metadata do pacote na Charge, devolver R$ 59,90 de um pacote

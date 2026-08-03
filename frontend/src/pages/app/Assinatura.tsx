@@ -13,7 +13,7 @@ const ROTULO_STATUS: Record<string, string> = {
 };
 
 export default function Assinatura() {
-  const { status, periodoFim, creditosCota, creditosAvulsos, cotaTotal } = useAssinatura();
+  const { status, periodoFim, creditosCota, creditosAvulsos, cotaTotal, cancelamentoAgendadoPara } = useAssinatura();
   const [erro, setErro] = useState<string | null>(null);
   const [abrindo, setAbrindo] = useState(false);
 
@@ -51,6 +51,15 @@ export default function Assinatura() {
         </div>
       )}
 
+      {cancelamentoAgendadoPara && (
+        <div role="status" className="mt-5 rounded-lg border border-brand-500/30 bg-brand-50 p-4 text-sm text-brand-900">
+          Sua assinatura continua ativa até{' '}
+          <strong>{new Date(cancelamentoAgendadoPara).toLocaleDateString('pt-BR')}</strong> e não será
+          renovada depois dessa data. Mudou de ideia? É só reativar pelo botão
+          "Gerenciar assinatura" abaixo.
+        </div>
+      )}
+
       <div className="mt-6 max-w-md rounded-2xl border border-stone-200 bg-white p-7 shadow-sm">
         <dl className="space-y-4 text-sm">
           <div className="flex justify-between">
@@ -61,11 +70,19 @@ export default function Assinatura() {
             <dt className="text-ink-600">Plano</dt>
             <dd className="font-semibold text-ink-800">R$ 179,99 /mês</dd>
           </div>
-          {periodoFim && (
+          {periodoFim && !cancelamentoAgendadoPara && (
             <div className="flex justify-between">
               <dt className="text-ink-600">Próxima cobrança</dt>
               <dd className="font-semibold text-ink-800">
                 {new Date(periodoFim).toLocaleDateString('pt-BR')}
+              </dd>
+            </div>
+          )}
+          {cancelamentoAgendadoPara && (
+            <div className="flex justify-between">
+              <dt className="text-ink-600">Assinatura termina em</dt>
+              <dd className="font-semibold text-ink-800">
+                {new Date(cancelamentoAgendadoPara).toLocaleDateString('pt-BR')}
               </dd>
             </div>
           )}

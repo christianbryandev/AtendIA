@@ -226,6 +226,36 @@ async function tratarSubscriptionDeleted(
 }
 
 /**
+ * customer.subscription.updated: dispara para qualquer mudança na
+ * subscription, mas o caso que interessa aqui é o cancelamento AGENDADO
+ * pelo Customer Portal. Nesse fluxo o Stripe NÃO manda
+ * customer.subscription.deleted na hora — a subscription continua
+ * `active` e só ganha `cancel_at` (data em que vai terminar). O delete
+ * de verdade só chega quando essa data vier.
+ *
+ * Por isso este tratador NUNCA mexe em status nem em crédito: o
+ * lojista pagou o mês e continua com acesso até `cancel_at` chegar,
+ * quando customer.subscription.deleted assume e faz a baixa de verdade.
+ * Aqui só registramos o aviso (e o período atualizado, já que o evento
+ * carrega o estado corrente da subscription) para a tela poder mostrar
+ * a data ao lojista.
+ *
+ * `cancel_at` vazio significa que o lojista reativou pelo próprio
+ * portal (o Stripe permite desfazer o cancelamento agendado) — nesse
+ * caso limpamos o aviso, a assinatura volta ao normal.
+ */
+async function tratarSubscriptionUpdated(
+  _evento: Stripe.Event,
+  objeto: any,
+  restauranteId: string,
+): Promise<void> {
+  await atualizarStatus(restauranteId, {
+    cancelamentoAgendadoPara: paraIso(objeto.cancel_at) ?? null,
+    periodoFim: periodoFimDaSubscription(objeto),
+  });
+}
+
+/**
  * Reembolso de pacote avulso (metadata.pacote_id presente na Charge).
  *
  * Correção do spec: reembolso só debita crédito quando é TOTAL — mesma
@@ -377,6 +407,7 @@ const TRATADORES: Record<string, Tratador> = {
   'invoice.paid': tratarInvoicePaid,
   'invoice.payment_failed': tratarInvoicePaymentFailed,
   'customer.subscription.deleted': tratarSubscriptionDeleted,
+  'customer.subscription.updated': tratarSubscriptionUpdated,
   'charge.refunded': tratarChargeRefunded,
 };
 

@@ -532,7 +532,7 @@ app.post('/api/billing/portal', autenticar, async (req, res) => {
 app.get('/api/billing/status', autenticar, async (req, res) => {
   const { data: assinatura } = await supabaseAdmin
     .from('assinaturas')
-    .select('status, periodo_fim, created_at')
+    .select('status, periodo_fim, created_at, cancelamento_agendado_para')
     .eq('restaurante_id', req.restauranteId)
     .maybeSingle();
 
@@ -566,6 +566,7 @@ app.get('/api/billing/status', autenticar, async (req, res) => {
     creditosCota: saldo?.creditos_cota ?? 0,
     creditosAvulsos: saldo?.creditos_avulsos ?? 0,
     cotaTotal: CREDITOS_DA_COTA,
+    cancelamentoAgendadoPara: assinatura.cancelamento_agendado_para ?? null,
   });
 });
 
