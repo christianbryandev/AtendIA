@@ -41,6 +41,7 @@ import {
   atualizarProduto,
   removerProduto,
 } from './services/cardapio/cardapio-repo.js';
+import { precoValido } from './services/cardapio/validacao-preco.js';
 
 const app = express();
 
@@ -981,13 +982,6 @@ app.put('/api/pdv/pedidos/:id/status', autenticar, exigirAssinaturaAtiva, async 
 // ============================================================
 // ROTAS DE CARDÁPIO (CATEGORIAS E PRODUTOS)
 // ============================================================
-
-// Preço precisa ser positivo e ter no máximo duas casas decimais, senão
-// o valor cobrado do cliente diverge do exibido no cardápio.
-function precoValido(preco: unknown): preco is number {
-  if (typeof preco !== 'number' || !Number.isFinite(preco) || preco <= 0) return false;
-  return Math.round(preco * 100) === preco * 100;
-}
 
 app.get('/api/cardapio', autenticar, exigirAssinaturaAtiva, async (req, res) => {
   try {
