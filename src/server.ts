@@ -13,6 +13,7 @@ import cors from 'cors';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { env, getJwtSecret, getCronSecret } from './config/env.js';
+import { corsOptions } from './config/cors.js';
 import { supabase, supabaseAdmin, getTenantSupabaseClient } from './config/supabase.js';
 import { transcribeAudioWithGroq } from './services/ai/groq-stt.js';
 import { processCustomerMessageWithAI } from './services/ai/openai-agent.js';
@@ -30,7 +31,7 @@ import { reconciliarSePreciso } from './services/billing/status.js';
 
 const app = express();
 
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json({
   // O callback de verify() do body-parser tipa `req` como IncomingMessage puro,
   // não como express.Request — por isso a augmentação global acima não se
