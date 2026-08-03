@@ -28,6 +28,10 @@ import { criarSessaoAssinatura, criarSessaoPacote, criarSessaoPortal } from './s
 import { webhookStripeHandler } from './services/billing/webhook-route.js';
 import { CREDITOS_DA_COTA } from './services/billing/cota.js';
 import { reconciliarSePreciso } from './services/billing/status.js';
+import { gravarMensagem, ultimasMensagens } from './services/conversas/mensagem-repo.js';
+import { buscarConversa, registrarMensagemDoCliente, registrarMensagemNossa, definirControleHumano } from './services/conversas/conversa-repo.js';
+import { decidirAtendimento } from './services/conversas/fluxo-webhook.js';
+import { salvarAudioDaMeta } from './services/whatsapp/audio-storage.js';
 
 const app = express();
 
@@ -146,6 +150,48 @@ app.post('/webhook/whatsapp', (req, res) => {
             return;
           }
 
+          // 1b. GRAVA A MENSAGEM DO CLIENTE E AVALIA CONTROLE HUMANO
+          // Grava a mensagem ANTES de qualquer processamento. Se a IA
+          // falhar, a mensagem do cliente continua registrada e visível
+          // na caixa de entrada — o lojista vê que alguém falou com ele
+          // e pode responder na mão. Gravando depois, uma falha da IA
+          // faria a mensagem sumir sem deixar rastro.
+          const agoraIso = new Date().toISOString();
+          const audioId = message.audio?.id;
+          let audioCaminho: string | null = null;
+
+          if (messageType === 'audio' && audioId) {
+            audioCaminho = await salvarAudioDaMeta(audioId, metaToken, restauranteId);
+          }
+
+          const idMensagemCliente = await gravarMensagem({
+            restauranteId,
+            telefoneCliente: fromPhone,
+            direcao: 'recebida',
+            autor: 'cliente',
+            tipo: messageType === 'audio' ? 'audio' : 'texto',
+            texto: messageType === 'text' ? message.text.body : null,
+            audioUrl: audioCaminho,
+            whatsappMessageId: messageId,
+          });
+
+          await registrarMensagemDoCliente(restauranteId, fromPhone, agoraIso);
+
+          // Conversa sob controle humano: a IA não responde e não gasta
+          // crédito. A devolução automática é avaliada aqui, na chegada
+          // da mensagem, em vez de por agendador.
+          const conversa = await buscarConversa(restauranteId, fromPhone);
+          const decisaoAtendimento = decidirAtendimento(conversa);
+
+          if (decisaoAtendimento.devolverControle) {
+            await definirControleHumano(restauranteId, fromPhone, false);
+          }
+
+          if (!decisaoAtendimento.iaResponde) {
+            console.log(`[Webhook] Conversa ${fromPhone} sob controle do lojista. IA nao responde.`);
+            return;
+          }
+
           // 2. CÁLCULO E CONSUMO DE CRÉDITOS (ANTES DE PROCESSAR)
           // 8 para áudio, alinhado com o que a landing vende. O número reflete o
           // custo real de STT + LLM + TTS; o TTS ainda não está ligado (ciclo 3),
@@ -176,10 +222,17 @@ app.post('/webhook/whatsapp', (req, res) => {
 
             if (messageType === 'audio') {
               console.log(`[Áudio Assíncrono] De: ${fromPhone} | Baixando da Meta e Transcrevendo...`);
-              const audioId = message.audio?.id;
               if (audioId) {
                 const audioBuffer = await downloadWhatsAppMedia(audioId, metaToken);
                 textoEntrada = await transcribeAudioWithGroq(audioBuffer, 'audio.ogg');
+
+                if (idMensagemCliente && textoEntrada) {
+                  await supabaseAdmin
+                    .from('mensagens')
+                    .update({ transcricao: textoEntrada })
+                    .eq('restaurante_id', restauranteId)
+                    .eq('id', idMensagemCliente);
+                }
               }
             } else if (messageType === 'text') {
               textoEntrada = message.text.body;
@@ -193,10 +246,18 @@ app.post('/webhook/whatsapp', (req, res) => {
                 telefoneWhatsApp: fromPhone,
               });
 
+              const historico = await ultimasMensagens(restauranteId, fromPhone, 20);
+
               const { respostaTexto } = await processCustomerMessageWithAI({
                 restauranteId,
                 telefoneCliente: fromPhone,
                 mensagemTexto: textoEntrada,
+                historicoConversa: historico
+                  .map((m) => ({
+                    role: m.autor === 'cliente' ? ('user' as const) : ('assistant' as const),
+                    content: m.transcricao ?? m.texto ?? '',
+                  }))
+                  .filter((m) => m.content.length > 0),
               });
 
               await sendWhatsAppTextMessage({
@@ -205,6 +266,15 @@ app.post('/webhook/whatsapp', (req, res) => {
                 phoneNumberId: fromPhoneNumberId,
                 token: metaToken
               });
+
+              await gravarMensagem({
+                restauranteId,
+                telefoneCliente: fromPhone,
+                direcao: 'enviada',
+                autor: 'ia',
+                texto: respostaTexto,
+              });
+              await registrarMensagemNossa(restauranteId, fromPhone, new Date().toISOString());
             } else {
               console.log(`[Webhook] Mensagem ignorada (tipo não suportado ou vazia). Reembolsando.`);
               
