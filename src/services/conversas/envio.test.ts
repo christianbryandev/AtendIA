@@ -6,6 +6,7 @@ const gravarMensagemMock = vi.fn();
 const marcarStatusMock = vi.fn();
 const sendWhatsAppTextMessageMock = vi.fn();
 const fromMock = vi.fn();
+const decryptMock = vi.fn();
 
 vi.mock('./conversa-repo.js', () => ({
   buscarConversa: (...a: unknown[]) => buscarConversaMock(...a),
@@ -27,6 +28,10 @@ vi.mock('../../config/supabase.js', () => ({
 
 vi.mock('../../config/env.js', () => ({
   env: { META_WHATSAPP_TOKEN: 'token-de-ambiente' },
+}));
+
+vi.mock('../../utils/crypto.js', () => ({
+  decrypt: (...a: unknown[]) => decryptMock(...a),
 }));
 
 import { enviarMensagemDoLojista } from './envio.js';
@@ -54,6 +59,7 @@ describe('enviarMensagemDoLojista', () => {
     marcarStatusMock.mockReset();
     sendWhatsAppTextMessageMock.mockReset();
     fromMock.mockReset();
+    decryptMock.mockReset();
     mockRestaurante({ meta_phone_number_id: 'PHONE-123', meta_access_token: null });
   });
 
@@ -144,6 +150,58 @@ describe('enviarMensagemDoLojista', () => {
     });
 
     expect(marcarStatusMock).toHaveBeenCalledWith(RESTAURANTE_ID, 'msg-2', 'falha', 'Erro tecnico da Meta');
+  });
+
+  it('quando o Supabase falha na busca do restaurante, devolve erro de infraestrutura e nao chama a Meta', async () => {
+    buscarConversaMock.mockResolvedValue({
+      id: 'conv-1',
+      restauranteId: RESTAURANTE_ID,
+      telefoneCliente: TELEFONE,
+      ultimaMensagemClienteEm: '2026-08-03T11:00:00.000Z',
+      ultimaMensagemEm: '2026-08-03T11:00:00.000Z',
+      sobControleHumano: true,
+      controleAssumidoEm: '2026-08-03T11:00:00.000Z',
+    });
+
+    // Mock de erro do Supabase
+    fromMock.mockReturnValue({
+      select: () => ({
+        eq: () => ({
+          single: () => Promise.resolve({ data: null, error: { message: 'Erro de conexao com banco de dados' } }),
+        }),
+      }),
+    });
+
+    const resultado = await enviarMensagemDoLojista(RESTAURANTE_ID, TELEFONE, 'Oi');
+
+    expect(resultado.ok).toBe(false);
+    // Mensagem deve indicar erro de infraestrutura, nao de "nao conectou WhatsApp"
+    const erro = (resultado as { ok: false; erro: string }).erro;
+    expect(erro).toMatch(/infraestrutura|dados do restaurante|tente novamente/i);
+    expect(sendWhatsAppTextMessageMock).not.toHaveBeenCalled();
+    expect(gravarMensagemMock).not.toHaveBeenCalled();
+  });
+
+  it('quando decrypt lancca (token corrompido), devolve erro sem propagar a excecao', async () => {
+    buscarConversaMock.mockResolvedValue({
+      id: 'conv-1',
+      restauranteId: RESTAURANTE_ID,
+      telefoneCliente: TELEFONE,
+      ultimaMensagemClienteEm: '2026-08-03T11:00:00.000Z',
+      ultimaMensagemEm: '2026-08-03T11:00:00.000Z',
+      sobControleHumano: true,
+      controleAssumidoEm: '2026-08-03T11:00:00.000Z',
+    });
+    mockRestaurante({ meta_phone_number_id: 'PHONE-123', meta_access_token: 'token-criptografado' });
+    decryptMock.mockImplementation(() => {
+      throw new Error('Token corrompido no banco de dados');
+    });
+
+    const resultado = await enviarMensagemDoLojista(RESTAURANTE_ID, TELEFONE, 'Oi');
+
+    expect(resultado.ok).toBe(false);
+    expect((resultado as { ok: false; erro: string }).erro).toBeTruthy();
+    expect(sendWhatsAppTextMessageMock).not.toHaveBeenCalled();
   });
 
   it('com a conversa inexistente, recusa com mensagem clara', async () => {
