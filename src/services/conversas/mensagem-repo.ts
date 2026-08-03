@@ -14,6 +14,7 @@ export interface NovaMensagem {
 }
 
 interface LinhaMensagem {
+  id: string;
   autor: string;
   texto: string | null;
   transcricao: string | null;
@@ -64,10 +65,10 @@ export async function ultimasMensagens(
   restauranteId: string,
   telefone: string,
   limite: number,
-): Promise<{ autor: string; texto: string | null; transcricao: string | null }[]> {
+): Promise<{ id: string; autor: string; texto: string | null; transcricao: string | null }[]> {
   const { data, error } = await supabaseAdmin
     .from('mensagens')
-    .select('autor, texto, transcricao, created_at')
+    .select('id, autor, texto, transcricao, created_at')
     .eq('restaurante_id', restauranteId)
     .eq('telefone_cliente', telefone)
     .order('created_at', { ascending: false })
@@ -75,6 +76,7 @@ export async function ultimasMensagens(
 
   if (error) throw error;
   return (data ?? []).reverse().map((m: LinhaMensagem) => ({
+    id: m.id,
     autor: m.autor,
     texto: m.texto,
     transcricao: m.transcricao,

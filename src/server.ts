@@ -248,11 +248,17 @@ app.post('/webhook/whatsapp', (req, res) => {
 
               const historico = await ultimasMensagens(restauranteId, fromPhone, 20);
 
+              // Filtra o histórico removendo a mensagem que acabou de ser gravada,
+              // pois ela será adicionada separadamente como mensagemTexto. Sem esse
+              // filtro, a mensagem atual do cliente apareceria duplicada no histórico
+              // enviado ao modelo (dois turnos 'user' idênticos consecutivos).
+              const historicoSemDuplicata = historico.filter((m) => m.id !== idMensagemCliente);
+
               const { respostaTexto } = await processCustomerMessageWithAI({
                 restauranteId,
                 telefoneCliente: fromPhone,
                 mensagemTexto: textoEntrada,
-                historicoConversa: historico
+                historicoConversa: historicoSemDuplicata
                   .map((m) => ({
                     role: m.autor === 'cliente' ? ('user' as const) : ('assistant' as const),
                     content: m.transcricao ?? m.texto ?? '',
