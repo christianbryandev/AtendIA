@@ -1,0 +1,13 @@
+{
+  // Configuração usada só pelo `npm run build`, que gera o `dist/` publicado.
+  //
+  // O tsconfig.json principal inclui os arquivos de teste de propósito, para
+  // que `npx tsc --noEmit` valide os tipos deles também. Mas o build de
+  // produção não pode compilá-los: os testes importam `vitest`, que vive em
+  // devDependencies e não é instalado quando NODE_ENV=production. Sem esta
+  // separação, o deploy quebra com "Cannot find module 'vitest'".
+  //
+  // Também não faz sentido publicar teste dentro do dist/.
+  "extends": "./tsconfig.json",
+  "exclude": ["**/*.test.ts", "node_modules", "dist"]
+}
