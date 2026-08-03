@@ -253,7 +253,31 @@ describe('charge.refunded', () => {
   // A compra de pacote gera uma Charge do mesmo Customer da assinatura.
   // Sem a metadata do pacote na Charge, devolver R$ 59,90 de um pacote
   // por cortesia cancelaria a assinatura e zeraria a cota do restaurante.
+  it('reembolso TOTAL de pacote avulso debita os creditos do saldo avulso', async () => {
+    rpcMock.mockResolvedValue({ data: 2500, error: null });
+
+    await processarEvento({
+      id: 'evt_pacote',
+      type: 'charge.refunded',
+      data: {
+        object: {
+          customer: 'cus_1',
+          amount: 5990,
+          amount_refunded: 5990,
+          metadata: { restaurante_id: 'rest-1', pacote_id: 'creditos_2500' },
+        },
+      },
+    } as any);
+
+    expect(rpcMock).toHaveBeenCalledWith('debitar_pacote_avulso', {
+      p_restaurante_id: 'rest-1',
+      p_qtd: 2500,
+    });
+  });
+
   it('reembolso TOTAL de pacote avulso nao mexe na assinatura, no status nem na cota', async () => {
+    rpcMock.mockResolvedValue({ data: 2500, error: null });
+
     await processarEvento({
       id: 'evt_pacote',
       type: 'charge.refunded',
@@ -269,7 +293,31 @@ describe('charge.refunded', () => {
 
     expect(subscriptionsCancelMock).not.toHaveBeenCalled();
     expect(atualizarStatusMock).not.toHaveBeenCalled();
-    expect(rpcMock).not.toHaveBeenCalled();
+    expect(rpcMock).not.toHaveBeenCalledWith('resetar_cota_mensal', expect.anything());
+  });
+
+  it('reembolso de pacote avulso com saldo insuficiente debita so o que existe, sem ficar negativo', async () => {
+    // A RPC devolve quanto de fato debitou (LEAST(saldo, qtd)); aqui
+    // simula o lojista ja tendo consumido parte do pacote.
+    rpcMock.mockResolvedValue({ data: 1000, error: null });
+
+    await processarEvento({
+      id: 'evt_pacote_parcial',
+      type: 'charge.refunded',
+      data: {
+        object: {
+          customer: 'cus_1',
+          amount: 5990,
+          amount_refunded: 5990,
+          metadata: { restaurante_id: 'rest-1', pacote_id: 'creditos_2500' },
+        },
+      },
+    } as any);
+
+    expect(rpcMock).toHaveBeenCalledWith('debitar_pacote_avulso', {
+      p_restaurante_id: 'rest-1',
+      p_qtd: 2500,
+    });
   });
 
   it('reembolso da assinatura (sem pacote_id na metadata) cancela e zera a cota', async () => {
@@ -352,6 +400,27 @@ describe('evento de tipo não tratado', () => {
       data: { object: { customer: 'cus_1' } },
     } as any);
 
+    expect(atualizarStatusMock).not.toHaveBeenCalled();
+    expect(rpcMock).not.toHaveBeenCalled();
+  });
+
+  // Caso real capturado em produção (modo teste): invoice_payment.paid
+  // não é um tipo que o handler trata, e o evento não tinha restaurante
+  // identificável (customer desconhecido). Antes da correção, a
+  // checagem de restaurante rodava ANTES do filtro de tipo tratado e
+  // lançava de propósito — fazendo o Stripe retentar para sempre um
+  // evento que nunca teria o que fazer. Tipo não tratado precisa sair
+  // cedo, sem sequer tentar identificar o restaurante.
+  it('evento de tipo nao tratado e sem restaurante identificavel nao lanca e nao escreve nada', async () => {
+    buscarPorCustomerIdMock.mockResolvedValue(null);
+
+    await expect(processarEvento({
+      id: 'evt_1U06GgCEV8Y7cUalpjHTUnaq',
+      type: 'invoice_payment.paid',
+      data: { object: { customer: 'cus_fantasma' } },
+    } as any)).resolves.toBeUndefined();
+
+    expect(buscarPorCustomerIdMock).not.toHaveBeenCalled();
     expect(atualizarStatusMock).not.toHaveBeenCalled();
     expect(rpcMock).not.toHaveBeenCalled();
   });

@@ -71,6 +71,29 @@ export async function removerRegistroEvento(eventId: string): Promise<void> {
   }
 }
 
+/**
+ * Único lugar que sabe quais tipos de evento o handler trata. O switch
+ * abaixo usa a mesma lista (via TIPOS_TRATADOS.has em cada case seria
+ * redundante — o que importa é que este Set e os `case` do switch nunca
+ * fiquem dessincronizados, então ambos são mantidos lado a lado e um
+ * teste cobre o caso de um tipo novo não seria adicionado aqui).
+ *
+ * A conta do Stripe emite dezenas de tipos de evento que este handler
+ * nunca vai tratar (ex.: invoice_payment.paid). Sem esta lista, todo
+ * evento desses cairia na checagem de "restaurante não identificável"
+ * antes mesmo de chegar ao switch — e como essa checagem lança de
+ * propósito (para acionar retentativa em casos que valem a pena), um
+ * evento que a gente nunca vai processar entraria num laço de
+ * retentativa infinito.
+ */
+const TIPOS_TRATADOS = new Set<string>([
+  'checkout.session.completed',
+  'invoice.paid',
+  'invoice.payment_failed',
+  'customer.subscription.deleted',
+  'charge.refunded',
+]);
+
 async function restauranteDoEvento(objeto: any): Promise<string | null> {
   const direto = objeto?.metadata?.restaurante_id || objeto?.client_reference_id;
   if (direto) return direto;
@@ -106,6 +129,22 @@ async function chamarRpc(nome: string, args: Record<string, unknown>): Promise<v
 }
 
 /**
+ * Mesma checagem de erro do chamarRpc acima, mas devolvendo o `data` —
+ * usado por debitar_pacote_avulso, que devolve quanto foi de fato
+ * debitado para o chamador poder logar o que se perdeu por saldo
+ * insuficiente.
+ */
+async function chamarRpcComRetorno<T>(nome: string, args: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabaseAdmin.rpc(nome, args);
+
+  if (error) {
+    throw new Error(`[Stripe] RPC ${nome} falhou para ${JSON.stringify(args)}: ${error.message}`);
+  }
+
+  return data as T;
+}
+
+/**
  * Busca no Stripe a data de fim do ciclo da assinatura recém-criada.
  *
  * O objeto Checkout Session não traz essa data — só o id da subscription
@@ -134,6 +173,16 @@ async function buscarPeriodoFim(subscriptionId: string | null): Promise<string |
 }
 
 export async function processarEvento(evento: Stripe.Event): Promise<void> {
+  // Sai cedo, ANTES de tentar identificar o restaurante, para tipos de
+  // evento que o handler não trata. Marcar como processado é o correto
+  // aqui: não há nada a fazer com esses eventos, e retentar não mudaria
+  // isso. Se essa checagem rodasse depois da busca do restaurante, um
+  // evento não tratado (ex.: invoice_payment.paid) e sem restaurante
+  // identificável cairia no `throw` abaixo por engano e entraria num
+  // laço de retentativa infinito — foi exatamente isso que aconteceu no
+  // teste real com a conta do Stripe.
+  if (!TIPOS_TRATADOS.has(evento.type)) return;
+
   const objeto = evento.data.object as any;
   const restauranteId = await restauranteDoEvento(objeto);
 
@@ -143,6 +192,10 @@ export async function processarEvento(evento: Stripe.Event): Promise<void> {
   // resolveria uma corrida com o salvamento do stripe_customer_id —
   // seria descartado como duplicata para sempre. Lançando, quem chamou
   // roda removerRegistroEvento e o reenvio volta a ser tratado como novo.
+  //
+  // Só chega aqui para tipos que TIPOS_TRATADOS já filtrou como
+  // tratados (ver saída antecipada acima), então não achar o
+  // restaurante é de fato uma falha que vale a pena retentar.
   if (!restauranteId) {
     throw new Error(
       `[Stripe] Evento ${evento.id} (${evento.type}) sem restaurante identificavel.`,
@@ -229,10 +282,39 @@ export async function processarEvento(evento: Stripe.Event): Promise<void> {
       // para a Charge. Não dá para distinguir pelo campo `invoice`: ele
       // não existe mais no objeto Charge da versão de API deste SDK.
       if (objeto.metadata?.pacote_id) {
+        // Decisão de negócio: reembolsar um pacote avulso debita os
+        // créditos correspondentes de creditos_avulsos. Sem isso, o
+        // lojista devolve o dinheiro e fica com os créditos de graça —
+        // foi exatamente o que aconteceu no teste real (R$ 59,90
+        // reembolsados, 2.500 créditos mantidos).
+        const pacote = pacotePorId(objeto.metadata.pacote_id);
+
+        if (!pacote) {
+          console.error(
+            `[Stripe] Reembolso ${evento.id} referencia pacote_id ` +
+            `"${objeto.metadata.pacote_id}" desconhecido; nao foi possivel debitar ` +
+            `creditos avulsos do restaurante ${restauranteId}.`,
+          );
+          return;
+        }
+
+        const debitado = await chamarRpcComRetorno<number>('debitar_pacote_avulso', {
+          p_restaurante_id: restauranteId,
+          p_qtd: pacote.creditos,
+        });
+
+        const naoDebitado = pacote.creditos - debitado;
+
+        // O saldo nunca fica negativo: a RPC debita no máximo o que
+        // existe. Se o lojista já consumiu parte, sobra uma diferença
+        // que ninguém devolveu — logada aqui para o dono do projeto
+        // decidir se vale cobrar manualmente.
         console.log(
           `[Stripe] Evento ${evento.id}: reembolso de pacote avulso ` +
           `(pacote_id=${objeto.metadata.pacote_id}) do restaurante ${restauranteId}. ` +
-          `A assinatura, o status e a cota nao sao afetados.`,
+          `Debitados ${debitado} de ${pacote.creditos} creditos avulsos` +
+          (naoDebitado > 0 ? ` (${naoDebitado} ja haviam sido consumidos e nao puderam ser recuperados).` : '.') +
+          ` A assinatura, o status e a cota nao sao afetados.`,
         );
         return;
       }
