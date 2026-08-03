@@ -296,6 +296,30 @@ describe('charge.refunded', () => {
     expect(rpcMock).not.toHaveBeenCalledWith('resetar_cota_mensal', expect.anything());
   });
 
+  // Correção do spec: neste modelo de negócio, reembolso é sempre
+  // integral. Um estorno parcial de cortesia (ex.: R$ 5 num pacote de
+  // R$ 59,90) não pode debitar os créditos inteiros do pacote — mesma
+  // regra do reembolso de assinatura, que só age no reembolso total.
+  it('reembolso PARCIAL de pacote avulso nao debita credito, nao muda status e nao mexe na cota', async () => {
+    await processarEvento({
+      id: 'evt_pacote_cortesia',
+      type: 'charge.refunded',
+      data: {
+        object: {
+          customer: 'cus_1',
+          amount: 5990,
+          amount_refunded: 500,
+          metadata: { restaurante_id: 'rest-1', pacote_id: 'creditos_2500' },
+        },
+      },
+    } as any);
+
+    expect(rpcMock).not.toHaveBeenCalledWith('debitar_pacote_avulso', expect.anything());
+    expect(rpcMock).not.toHaveBeenCalled();
+    expect(atualizarStatusMock).not.toHaveBeenCalled();
+    expect(subscriptionsCancelMock).not.toHaveBeenCalled();
+  });
+
   it('reembolso de pacote avulso com saldo insuficiente debita so o que existe, sem ficar negativo', async () => {
     // A RPC devolve quanto de fato debitou (LEAST(saldo, qtd)); aqui
     // simula o lojista ja tendo consumido parte do pacote.
