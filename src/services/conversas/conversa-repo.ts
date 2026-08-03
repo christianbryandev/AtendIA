@@ -39,13 +39,14 @@ export async function buscarConversa(
   restauranteId: string,
   telefone: string,
 ): Promise<Conversa | null> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('conversas')
     .select(COLUNAS)
     .eq('restaurante_id', restauranteId)
     .eq('telefone_cliente', telefone)
     .maybeSingle();
 
+  if (error) throw error;
   return data ? paraDominio(data as LinhaConversa) : null;
 }
 
@@ -110,12 +111,13 @@ export async function listarConversas(
   restauranteId: string,
   limite = 50,
 ): Promise<Conversa[]> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('conversas')
     .select(COLUNAS)
     .eq('restaurante_id', restauranteId)
     .order('ultima_mensagem_em', { ascending: false, nullsFirst: false })
     .limit(limite);
 
+  if (error) throw error;
   return (data ?? []).map((l) => paraDominio(l as LinhaConversa));
 }

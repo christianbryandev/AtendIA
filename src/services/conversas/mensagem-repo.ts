@@ -13,6 +13,12 @@ export interface NovaMensagem {
   status?: 'ok' | 'enviando' | 'falha';
 }
 
+interface LinhaMensagem {
+  autor: string;
+  texto: string | null;
+  transcricao: string | null;
+}
+
 export async function gravarMensagem(m: NovaMensagem): Promise<string> {
   const { data, error } = await supabaseAdmin
     .from('mensagens')
@@ -36,6 +42,7 @@ export async function gravarMensagem(m: NovaMensagem): Promise<string> {
 }
 
 export async function marcarStatus(
+  restauranteId: string,
   id: string,
   status: 'ok' | 'falha',
   erro?: string,
@@ -43,6 +50,7 @@ export async function marcarStatus(
   const { error } = await supabaseAdmin
     .from('mensagens')
     .update({ status, erro_envio: erro ?? null })
+    .eq('restaurante_id', restauranteId)
     .eq('id', id);
 
   if (error) throw error;
@@ -57,7 +65,7 @@ export async function ultimasMensagens(
   telefone: string,
   limite: number,
 ): Promise<{ autor: string; texto: string | null; transcricao: string | null }[]> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('mensagens')
     .select('autor, texto, transcricao, created_at')
     .eq('restaurante_id', restauranteId)
@@ -65,7 +73,8 @@ export async function ultimasMensagens(
     .order('created_at', { ascending: false })
     .limit(limite);
 
-  return (data ?? []).reverse().map((m: any) => ({
+  if (error) throw error;
+  return (data ?? []).reverse().map((m: LinhaMensagem) => ({
     autor: m.autor,
     texto: m.texto,
     transcricao: m.transcricao,
