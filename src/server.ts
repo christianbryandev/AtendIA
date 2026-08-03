@@ -540,11 +540,18 @@ app.get('/api/billing/status', autenticar, async (req, res) => {
     return res.status(404).json({ success: false, error: 'Conta sem assinatura.' });
   }
 
-  const status = await reconciliarSePreciso(
+  const reconciliacao = await reconciliarSePreciso(
     req.restauranteId!,
     assinatura.created_at,
     assinatura.status,
   );
+
+  // periodoFim só vem da reconciliação quando ela de fato atualizou o
+  // banco; nos demais casos (nenhuma ação, ou nenhuma mudança) usamos o
+  // valor lido antes, que continua correto.
+  const periodoFim = reconciliacao.periodoFim !== undefined
+    ? reconciliacao.periodoFim
+    : assinatura.periodo_fim;
 
   const { data: saldo } = await supabaseAdmin
     .from('restaurantes')
@@ -554,8 +561,8 @@ app.get('/api/billing/status', autenticar, async (req, res) => {
 
   return res.json({
     success: true,
-    status,
-    periodoFim: assinatura.periodo_fim,
+    status: reconciliacao.status,
+    periodoFim,
     creditosCota: saldo?.creditos_cota ?? 0,
     creditosAvulsos: saldo?.creditos_avulsos ?? 0,
     cotaTotal: CREDITOS_DA_COTA,

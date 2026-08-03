@@ -70,24 +70,40 @@ async function creditarCotaDaReconciliacao(restauranteId: string): Promise<void>
 }
 
 /**
+ * Resultado da reconciliação: o status (sempre presente) e, só quando a
+ * reconciliação de fato atualizou o banco, o novo `periodoFim`. Quando
+ * `periodoFim` vem `undefined`, nada mudou e quem chamou deve continuar
+ * usando o valor que já tinha lido do banco antes de reconciliar.
+ */
+export interface ResultadoReconciliacao {
+  status: string;
+  periodoFim?: string | null;
+}
+
+/**
  * Rede de segurança para webhook perdido: se a conta está pendente há
  * mais que alguns minutos, pergunta ao Stripe e se corrige. É a
  * reconciliação sob demanda, sem cron.
+ *
+ * Devolve o `periodoFim` novo só quando a reconciliação realmente grava
+ * no banco: quem chama fez a leitura da linha ANTES desta função rodar,
+ * então usar o status novo com o periodoFim antigo misturaria dado velho
+ * com novo na mesma resposta.
  */
 export async function reconciliarSePreciso(
   restauranteId: string,
   criadaEm: string,
   status: string,
-): Promise<string> {
-  if (status !== 'pendente') return status;
+): Promise<ResultadoReconciliacao> {
+  if (status !== 'pendente') return { status };
 
   const minutosDesde = (Date.now() - new Date(criadaEm).getTime()) / 60_000;
-  if (minutosDesde < MINUTOS_ATE_RECONCILIAR) return status;
+  if (minutosDesde < MINUTOS_ATE_RECONCILIAR) return { status };
 
-  if (!podeConsultarStripe(restauranteId)) return status;
+  if (!podeConsultarStripe(restauranteId)) return { status };
 
   const assinatura = await buscarAssinatura(restauranteId);
-  if (!assinatura?.stripeCustomerId) return status;
+  if (!assinatura?.stripeCustomerId) return { status };
 
   try {
     const { data } = await getStripe().subscriptions.list({
@@ -97,7 +113,7 @@ export async function reconciliarSePreciso(
     });
 
     const subscription = data[0];
-    if (!subscription) return status;
+    if (!subscription) return { status };
 
     // A cota vem ANTES do status, de propósito. Quem credita a cota
     // normalmente é o webhook — e esta reconciliação existe justamente
@@ -111,16 +127,18 @@ export async function reconciliarSePreciso(
     // deixa o status em 'pendente' e a próxima consulta tenta de novo.
     await creditarCotaDaReconciliacao(restauranteId);
 
+    const periodoFim = periodoFimDaSubscription(subscription);
+
     await atualizarStatus(restauranteId, {
       status: 'ativa',
       stripeSubscriptionId: subscription.id,
-      periodoFim: periodoFimDaSubscription(subscription),
+      periodoFim,
     });
 
-    return 'ativa';
+    return { status: 'ativa', periodoFim };
   } catch (erro) {
     // Stripe indisponível não pode virar erro na tela do lojista.
     console.error('[Billing] Falha ao reconciliar com o Stripe:', erro);
-    return status;
+    return { status };
   }
 }

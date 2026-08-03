@@ -36,19 +36,19 @@ beforeEach(() => {
 
 describe('reconciliarSePreciso', () => {
   it('não consulta o Stripe quando a assinatura já está ativa', async () => {
-    const status = await reconciliarSePreciso('rest-1', minutosAtras(60), 'ativa');
+    const resultado = await reconciliarSePreciso('rest-1', minutosAtras(60), 'ativa');
 
     expect(listarSubscriptionsMock).not.toHaveBeenCalled();
-    expect(status).toBe('ativa');
+    expect(resultado.status).toBe('ativa');
   });
 
   // Nos primeiros minutos o webhook ainda está a caminho. Consultar aí
   // só gastaria chamada de API.
   it('não consulta o Stripe quando está pendente há pouco tempo', async () => {
-    const status = await reconciliarSePreciso('rest-1', minutosAtras(2), 'pendente');
+    const resultado = await reconciliarSePreciso('rest-1', minutosAtras(2), 'pendente');
 
     expect(listarSubscriptionsMock).not.toHaveBeenCalled();
-    expect(status).toBe('pendente');
+    expect(resultado.status).toBe('pendente');
   });
 
   it('consulta o Stripe quando está pendente há mais de 5 minutos', async () => {
@@ -72,13 +72,13 @@ describe('reconciliarSePreciso', () => {
     buscarAssinaturaMock.mockResolvedValue({ stripeCustomerId: 'cus_1' });
     listarSubscriptionsMock.mockResolvedValue({ data: [subscriptionAtiva] });
 
-    const status = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
+    const resultado = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
 
     expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({
       status: 'ativa',
       stripeSubscriptionId: 'sub_1',
     }));
-    expect(status).toBe('ativa');
+    expect(resultado.status).toBe('ativa');
   });
 
   // Sem isto o lojista paga, o painel abre e a IA fica muda: quem credita
@@ -106,6 +106,22 @@ describe('reconciliarSePreciso', () => {
     }));
   });
 
+  // A rota monta a resposta com o status devolvido aqui, mas antes lia o
+  // periodoFim direto do banco ANTES da reconciliação rodar. Na requisição
+  // em que a reconciliação age, isso misturava status novo com periodoFim
+  // velho. Devolver o periodoFim novo junto do status resolve isso.
+  it('devolve o periodoFim novo junto do status, na requisicao em que reconcilia', async () => {
+    buscarAssinaturaMock.mockResolvedValue({ stripeCustomerId: 'cus_1' });
+    listarSubscriptionsMock.mockResolvedValue({ data: [subscriptionAtiva] });
+
+    const resultado = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
+
+    expect(resultado).toEqual({
+      status: 'ativa',
+      periodoFim: new Date(1793491200 * 1000).toISOString(),
+    });
+  });
+
   // A cota é creditada ANTES do status virar 'ativa'. Se a ordem fosse a
   // inversa e a RPC falhasse, a reconciliação nunca mais rodaria (ela só
   // age sobre 'pendente') e a cota ficaria perdida até a renovação.
@@ -114,28 +130,28 @@ describe('reconciliarSePreciso', () => {
     listarSubscriptionsMock.mockResolvedValue({ data: [subscriptionAtiva] });
     rpcMock.mockResolvedValue({ data: null, error: { message: 'banco fora do ar' } });
 
-    const status = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
+    const resultado = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
 
     expect(atualizarStatusMock).not.toHaveBeenCalled();
-    expect(status).toBe('pendente');
+    expect(resultado.status).toBe('pendente');
   });
 
   it('mantém pendente quando o Stripe também não conhece assinatura', async () => {
     buscarAssinaturaMock.mockResolvedValue({ stripeCustomerId: 'cus_1' });
 
-    const status = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
+    const resultado = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
 
     expect(atualizarStatusMock).not.toHaveBeenCalled();
-    expect(status).toBe('pendente');
+    expect(resultado.status).toBe('pendente');
   });
 
   it('não quebra quando a conta ainda não tem Customer', async () => {
     buscarAssinaturaMock.mockResolvedValue({ stripeCustomerId: null });
 
-    const status = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
+    const resultado = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
 
     expect(listarSubscriptionsMock).not.toHaveBeenCalled();
-    expect(status).toBe('pendente');
+    expect(resultado.status).toBe('pendente');
   });
 
   // Uma indisponibilidade do Stripe não pode transformar a tela de
@@ -144,9 +160,9 @@ describe('reconciliarSePreciso', () => {
     buscarAssinaturaMock.mockResolvedValue({ stripeCustomerId: 'cus_1' });
     listarSubscriptionsMock.mockRejectedValue(new Error('Stripe fora do ar'));
 
-    const status = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
+    const resultado = await reconciliarSePreciso('rest-1', minutosAtras(10), 'pendente');
 
-    expect(status).toBe('pendente');
+    expect(resultado.status).toBe('pendente');
   });
 
   // A tela de confirmação de pagamento faz polling desta rota a cada
@@ -179,10 +195,10 @@ describe('reconciliarSePreciso', () => {
       listarSubscriptionsMock.mockClear();
 
       vi.advanceTimersByTime(30_000);
-      const status = await reconciliarSePreciso(restauranteId, minutosAtras(10), 'pendente');
+      const resultado = await reconciliarSePreciso(restauranteId, minutosAtras(10), 'pendente');
 
       expect(listarSubscriptionsMock).not.toHaveBeenCalled();
-      expect(status).toBe('pendente');
+      expect(resultado.status).toBe('pendente');
     });
 
     it('volta a consultar o Stripe depois que a janela de 60s passa', async () => {
