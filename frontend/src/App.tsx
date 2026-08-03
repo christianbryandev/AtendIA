@@ -23,6 +23,7 @@ const Confirmando = lazy(() => import('./pages/app/Confirmando'));
 const Assinatura = lazy(() => import('./pages/app/Assinatura'));
 const Creditos = lazy(() => import('./pages/app/Creditos'));
 const Cardapio = lazy(() => import('./pages/app/Cardapio'));
+const Configuracoes = lazy(() => import('./pages/app/Configuracoes'));
 
 const Carregando = () => (
   <div className="py-24 text-center text-sm text-ink-600">Carregando…</div>
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="/app/assinatura" element={<Assinatura />} />
             <Route path="/app/creditos" element={<Creditos />} />
             <Route path="/app/cardapio" element={<Cardapio />} />
+            <Route path="/app/configuracoes" element={<Configuracoes />} />
           </Route>
         </Route>
       </Routes>

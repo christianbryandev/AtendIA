@@ -42,6 +42,7 @@ import {
   removerProduto,
 } from './services/cardapio/cardapio-repo.js';
 import { precoValido } from './services/cardapio/validacao-preco.js';
+import { testarConexao, salvarConexao, estadoDaConexao } from './services/whatsapp/conexao.js';
 
 const app = express();
 
@@ -1093,6 +1094,53 @@ app.delete('/api/cardapio/produtos/:id', autenticar, exigirAssinaturaAtiva, asyn
   } catch (err) {
     console.error('[Cardápio] Erro ao remover produto:', err);
     return res.status(500).json({ error: 'Erro ao remover o produto.' });
+  }
+});
+
+// ============================================================
+// ROTAS DE CONEXÃO COM O WHATSAPP (META CLOUD API)
+// ============================================================
+// Conexão manual: a verificação de "provedora de tecnologia" da Meta
+// ainda está em análise. Enquanto não sair, o lojista cola o ID do
+// número e o token que ele mesmo obteve no painel da Meta.
+
+app.get('/api/whatsapp/conexao', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const estado = await estadoDaConexao(req.restauranteId!);
+    return res.json(estado);
+  } catch (err) {
+    console.error('[WhatsApp] Erro ao buscar estado da conexão:', err);
+    return res.status(500).json({ error: 'Erro ao buscar o estado da conexão.' });
+  }
+});
+
+app.post('/api/whatsapp/conexao/testar', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const { phoneNumberId, token } = req.body;
+    if (!phoneNumberId || typeof phoneNumberId !== 'string' || !token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'Informe o ID do número e o token.' });
+    }
+
+    const resultado = await testarConexao(phoneNumberId, token);
+    return res.json(resultado);
+  } catch (err) {
+    console.error('[WhatsApp] Erro ao testar conexão:', err);
+    return res.status(500).json({ error: 'Erro ao testar a conexão.' });
+  }
+});
+
+app.post('/api/whatsapp/conexao', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const { phoneNumberId, token } = req.body;
+    if (!phoneNumberId || typeof phoneNumberId !== 'string' || !token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'Informe o ID do número e o token.' });
+    }
+
+    await salvarConexao(req.restauranteId!, phoneNumberId, token);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[WhatsApp] Erro ao salvar conexão:', err);
+    return res.status(500).json({ error: 'Erro ao salvar a conexão.' });
   }
 });
 
