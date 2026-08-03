@@ -177,6 +177,12 @@ async function tratarCheckoutSessionCompleted(
     status: 'ativa',
     stripeSubscriptionId: subscriptionId,
     periodoFim: await buscarPeriodoFim(subscriptionId),
+    // Limpa um eventual aviso de cancelamento agendado de uma assinatura
+    // anterior: o lojista pode ter agendado o cancelamento, mudado de
+    // ideia e feito um checkout novo em vez de reativar pelo Portal. Sem
+    // isso, a assinatura nova nasce exibindo o aviso de cancelamento da
+    // antiga.
+    cancelamentoAgendadoPara: null,
   });
 
   await chamarRpc('resetar_cota_mensal', {
@@ -219,6 +225,10 @@ async function tratarSubscriptionDeleted(
   await atualizarStatus(restauranteId, {
     status: 'cancelada',
     canceladaEm: new Date().toISOString(),
+    // A assinatura já terminou de fato: um aviso de "continua ativa até
+    // [data passada]" deixado para trás contradiz o status 'cancelada'
+    // que acabou de ser gravado.
+    cancelamentoAgendadoPara: null,
   });
 
   // Zera só a cota. Avulso foi pago à parte e continua valendo.
@@ -384,6 +394,10 @@ async function tratarChargeRefunded(evento: Stripe.Event, objeto: any, restauran
   await atualizarStatus(restauranteId, {
     status: 'reembolsada',
     canceladaEm: new Date().toISOString(),
+    // O reembolso total também encerra o serviço: um cancelamento
+    // agendado que porventura existisse fica órfão e mentiria na tela
+    // junto com o status 'reembolsada'.
+    cancelamentoAgendadoPara: null,
   });
 
   await chamarRpc('resetar_cota_mensal', { p_restaurante_id: restauranteId, p_qtd: 0 });

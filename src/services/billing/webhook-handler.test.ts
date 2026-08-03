@@ -149,6 +149,17 @@ describe('checkout.session.completed em modo subscription', () => {
     }));
   });
 
+  // O lojista pode ter agendado o cancelamento, mudado de ideia e feito
+  // um checkout novo em vez de reativar pelo Portal. Sem isso, a
+  // assinatura nova nasceria exibindo o aviso de cancelamento da antiga.
+  it('limpa um cancelamento agendado deixado por uma assinatura anterior', async () => {
+    await processarEvento(evento);
+
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({
+      cancelamentoAgendadoPara: null,
+    }));
+  });
+
   // Ativar a conta e creditar a cota valem mais do que uma data na tela.
   it('ativa a conta mesmo se o Stripe falhar ao devolver a subscription', async () => {
     subscriptionsRetrieveMock.mockRejectedValue(new Error('Stripe fora do ar'));
@@ -246,6 +257,21 @@ describe('customer.subscription.deleted', () => {
 
     expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({ status: 'cancelada' }));
     expect(rpcMock).toHaveBeenCalledWith('resetar_cota_mensal', { p_restaurante_id: 'rest-1', p_qtd: 0 });
+  });
+
+  // A assinatura já terminou de fato: um aviso de "continua ativa até
+  // [data passada]" deixado para trás contradiz o status 'cancelada'
+  // que acabou de ser gravado, mentindo para o lojista no painel.
+  it('limpa o cancelamento agendado, para o aviso nao sobreviver ao fim da assinatura', async () => {
+    await processarEvento({
+      id: 'evt_6b',
+      type: 'customer.subscription.deleted',
+      data: { object: { customer: 'cus_1' } },
+    } as any);
+
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({
+      cancelamentoAgendadoPara: null,
+    }));
   });
 });
 
@@ -446,6 +472,28 @@ describe('charge.refunded', () => {
     expect(subscriptionsCancelMock).toHaveBeenCalledWith('sub_1');
     expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({ status: 'reembolsada' }));
     expect(rpcMock).toHaveBeenCalledWith('resetar_cota_mensal', { p_restaurante_id: 'rest-1', p_qtd: 0 });
+  });
+
+  // O reembolso total também encerra o serviço: um cancelamento agendado
+  // que porventura existisse ficaria órfão e mentiria na tela junto com
+  // o status 'reembolsada'.
+  it('reembolso total da assinatura limpa um cancelamento agendado que porventura existisse', async () => {
+    await processarEvento({
+      id: 'evt_assinatura_agendada',
+      type: 'charge.refunded',
+      data: {
+        object: {
+          customer: 'cus_1',
+          amount: 17999,
+          amount_refunded: 17999,
+          metadata: { restaurante_id: 'rest-1' },
+        },
+      },
+    } as any);
+
+    expect(atualizarStatusMock).toHaveBeenCalledWith('rest-1', expect.objectContaining({
+      cancelamentoAgendadoPara: null,
+    }));
   });
 
   it('reembolso parcial nao altera status nem cota', async () => {
