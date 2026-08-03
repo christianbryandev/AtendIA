@@ -29,6 +29,14 @@ export function ehOrigemSupabaseValida(valor: string): boolean {
   return semPath && url.search === '' && url.hash === '';
 }
 
+// Normaliza APP_URL para a origem pura (esquema://host[:porta], sem barra
+// final e sem caminho). Exportada para ser testada isoladamente, sem
+// disparar o parse do process.env inteiro (que acontece no import deste
+// módulo). Ver o comentário no schema, no campo APP_URL, para o motivo.
+export function normalizarAppUrl(valor: string): string {
+  return new URL(valor).origin;
+}
+
 const envSchema = z.object({
   PORT: z.string().default('3000'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -60,7 +68,22 @@ const envSchema = z.object({
   STRIPE_PRICE_CREDITOS_2500: z.string().optional(),
   STRIPE_PRICE_CREDITOS_5000: z.string().optional(),
   STRIPE_PRICE_CREDITOS_10000: z.string().optional(),
-  APP_URL: z.string().url().default('http://localhost:5173'),
+  // Normalizada para a origem pura (esquema://host[:porta], sem barra final
+  // e sem caminho) via `new URL(...).origin`. Isso existe por causa de um bug
+  // real: se APP_URL for configurada no Render com barra final (por exemplo
+  // "https://atendiarp.com.br/"), o CORS (src/config/cors.ts) passa a
+  // comparar essa string contra o cabeçalho `Origin` do navegador — que
+  // nunca tem barra final — e recusa toda chamada do frontend de produção
+  // (login, painel, cobrança). Também evita URLs de retorno do Stripe com
+  // barra dupla, como "https://atendiarp.com.br//assinatura/confirmando"
+  // (ver src/services/billing/checkout.ts). Não remova esta normalização
+  // sem entender que ela é o que garante que todo consumidor de APP_URL
+  // recebe sempre a origem limpa.
+  APP_URL: z
+    .string()
+    .url()
+    .default('http://localhost:5173')
+    .transform(normalizarAppUrl),
 });
 
 export const env = envSchema.parse(process.env);
