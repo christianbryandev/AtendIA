@@ -33,6 +33,7 @@ import { buscarConversa, registrarMensagemDoCliente, registrarMensagemNossa, def
 import { decidirAtendimento, montarHistoricoParaIA } from './services/conversas/fluxo-webhook.js';
 import { enviarMensagemDoLojista } from './services/conversas/envio.js';
 import { calcularJanela } from './services/conversas/janela.js';
+import { buscarTrechosUltimaMensagem } from './services/conversas/trecho-conversa.js';
 import { salvarAudioDaMeta, urlAssinadaDoAudio } from './services/whatsapp/audio-storage.js';
 import {
   listarCardapio,
@@ -1171,10 +1172,12 @@ app.get('/api/atendimento/conversas', autenticar, exigirAssinaturaAtiva, async (
     if (error) throw error;
 
     const nomePorTelefone = new Map((clientes ?? []).map((c) => [c.telefone_whatsapp, c.nome]));
+    const trechoPorTelefone = await buscarTrechosUltimaMensagem(restauranteId, telefones);
 
     const resposta = conversas.map((conversa) => ({
       ...conversa,
       nomeCliente: nomePorTelefone.get(conversa.telefoneCliente) ?? null,
+      trechoUltimaMensagem: trechoPorTelefone.get(conversa.telefoneCliente) ?? null,
       janela: calcularJanela(conversa.ultimaMensagemClienteEm),
     }));
 
