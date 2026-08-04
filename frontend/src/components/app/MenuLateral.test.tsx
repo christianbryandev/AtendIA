@@ -81,4 +81,24 @@ describe('MenuLateral', () => {
 
     expect(screen.getByRole('link', { name: 'Atendimento' })).toBeInTheDocument();
   });
+
+  it('fecha o menu ao clicar num item em viewport pequeno', async () => {
+    definirLargura(LARGURA_CELULAR);
+    montar();
+
+    await userEvent.click(screen.getByRole('button', { name: /abrir menu/i }));
+    await userEvent.click(screen.getByRole('link', { name: 'Cardápio' }));
+
+    expect(screen.queryByRole('link', { name: 'Cardápio' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /abrir menu/i })).toBeInTheDocument();
+  });
+
+  it('mantem o menu aberto ao clicar num item em viewport de desktop', async () => {
+    definirLargura(LARGURA_DESKTOP);
+    montar();
+
+    await userEvent.click(screen.getByRole('link', { name: 'Cardápio' }));
+
+    expect(screen.getByRole('link', { name: 'Cardápio' })).toBeInTheDocument();
+  });
 });

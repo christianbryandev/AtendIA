@@ -31,6 +31,15 @@ export default function MenuLateral() {
     navigate('/login');
   };
 
+  // Em viewport pequeno o menu cobre a tela toda; sem fechar sozinho ao
+  // navegar, o lojista precisa fechar na mão a cada item clicado. Em
+  // desktop o menu fica sempre visível, então não faz sentido fechar.
+  const selecionarItem = () => {
+    if (window.innerWidth < LARGURA_BREAKPOINT_PX) {
+      setAberto(false);
+    }
+  };
+
   return (
     <div className="border-b border-stone-200 bg-white md:flex md:min-h-screen md:border-b-0 md:border-r">
       <div className="flex items-center justify-between px-4 py-3 md:hidden">
@@ -58,6 +67,7 @@ export default function MenuLateral() {
               <li key={item.rota}>
                 <NavLink
                   to={item.rota}
+                  onClick={selecionarItem}
                   className={({ isActive }) =>
                     `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
                       isActive
