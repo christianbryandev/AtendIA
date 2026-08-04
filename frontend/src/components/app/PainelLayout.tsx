@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import ProtectedRoute from '../ProtectedRoute';
 import FaixaCota from './FaixaCota';
+import MenuLateral from './MenuLateral';
 
 /**
  * Casca comum das telas do painel (/app/*).
@@ -21,8 +22,13 @@ import FaixaCota from './FaixaCota';
 export default function PainelLayout() {
   return (
     <ProtectedRoute exigirAssinatura>
-      <FaixaCota />
-      <Outlet />
+      <div className="md:flex">
+        <MenuLateral />
+        <div className="min-w-0 flex-1">
+          <FaixaCota />
+          <Outlet />
+        </div>
+      </div>
     </ProtectedRoute>
   );
 }

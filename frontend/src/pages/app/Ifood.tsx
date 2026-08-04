@@ -46,7 +46,7 @@ export default function Ifood() {
               <p className="text-sm text-gray-700">
                 Sua conta já está autenticada e vinculada ao restaurante na nossa base de dados. Basta clicar no botão abaixo para buscar as informações atualizadas do iFood automaticamente.
               </p>
-              <div className="mt-4 rounded bg-blue-50 p-3 text-xs text-blue-800 border border-blue-100">
+              <div className="mt-4 rounded bg-brand-50 p-3 text-xs text-ink-800 border border-stone-200">
                 <i className="fa-solid fa-shield-halved mr-1"></i> A sincronização utiliza credenciais seguras e não expõe seus dados.
               </div>
             </div>

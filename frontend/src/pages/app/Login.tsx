@@ -43,7 +43,7 @@ export default function Login() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50 text-gray-900">
       <div className="w-full max-w-md rounded-2xl bg-white p-10 shadow-xl border border-gray-100">
         <div className="mb-8 text-center">
-          <div className="mb-3 text-4xl text-sky-500">
+          <div className="mb-3 text-4xl text-brand-700">
             <i className="fa-solid fa-robot"></i>
           </div>
           <h1 className="text-2xl font-bold text-gray-900">Painel de Gestão IA</h1>
@@ -70,7 +70,7 @@ export default function Login() {
             <input
               type="email"
               id="email"
-              className="w-full rounded-lg border border-gray-300 bg-white p-3 text-sm text-gray-900 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              className="w-full rounded-lg border border-gray-300 bg-white p-3 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               placeholder="seuemail@restaurante.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -85,14 +85,14 @@ export default function Login() {
             <input
               type="password"
               id="password"
-              className="w-full rounded-lg border border-gray-300 bg-white p-3 text-sm text-gray-900 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              className="w-full rounded-lg border border-gray-300 bg-white p-3 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
             <div className="mt-2 text-right">
-              <Link to="/esqueci-senha" className="text-xs font-semibold text-sky-600 hover:text-sky-700">
+              <Link to="/esqueci-senha" className="text-xs font-semibold text-brand-700 hover:text-brand-900">
                 Esqueci minha senha
               </Link>
             </div>
@@ -101,7 +101,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={isLoading}
-            className="mt-2 w-full rounded-lg bg-sky-600 p-3 text-sm font-bold text-white transition-colors hover:bg-sky-700 disabled:opacity-70"
+            className="mt-2 w-full rounded-lg bg-brand-700 p-3 text-sm font-bold text-white transition-colors hover:bg-brand-800 disabled:opacity-70"
           >
             {isLoading ? 'Entrando...' : 'Entrar no Painel'}
           </button>
