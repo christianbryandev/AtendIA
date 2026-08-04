@@ -82,12 +82,33 @@ app.get('/webhook/whatsapp', (req, res) => {
 // ------------------------------------------------------------------
 // 2. RECEBIMENTO ASSÍNCRONO DE MENSAGENS (USO RESTRITO DA SERVICE_ROLE)
 // ------------------------------------------------------------------
+// Contadores em memória, sem conteúdo de mensagem. Ver o comentário no
+// handler do webhook para o motivo de existirem.
+const diagnosticoWebhook = {
+  recebidos: 0,
+  aceitos: 0,
+  recusadosPorAssinatura: 0,
+  ultimoRecebidoEm: null as string | null,
+};
+
 app.post('/webhook/whatsapp', (req, res) => {
+  // Contadores de diagnóstico do webhook, expostos em GET /health.
+  //
+  // Existem porque "a mensagem não chegou" tem causas em camadas
+  // diferentes — a Meta pode nem estar nos chamando, pode estar chamando
+  // e sendo recusada na assinatura, ou pode chegar e o restaurante não
+  // ser encontrado. Sem contador, os três parecem iguais de fora, e a
+  // investigação vira adivinhação. São só contadores em memória: zeram a
+  // cada reinício e não guardam conteúdo de mensagem.
+  diagnosticoWebhook.recebidos += 1;
+  diagnosticoWebhook.ultimoRecebidoEm = new Date().toISOString();
+
   const signature = req.headers['x-hub-signature-256'];
   const rawBody = req.rawBody;
 
   if (!signature || typeof signature !== 'string' || !signature.startsWith('sha256=') || !rawBody) {
     console.error('[Webhook] Falha na validação: Assinatura ou rawBody ausente/inválido.');
+    diagnosticoWebhook.recusadosPorAssinatura += 1;
     return res.status(401).send('Unauthorized');
   }
 
@@ -98,8 +119,11 @@ app.post('/webhook/whatsapp', (req, res) => {
 
   if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
     console.error('[Webhook] Falha na validação: Assinatura não confere.');
+    diagnosticoWebhook.recusadosPorAssinatura += 1;
     return res.status(401).send('Unauthorized');
   }
+
+  diagnosticoWebhook.aceitos += 1;
 
   res.status(200).send('EVENT_RECEIVED');
 
@@ -1383,6 +1407,7 @@ app.get('/health', (req, res) => {
     status: 'online',
     timestamp: new Date().toISOString(),
     integracoes: statusIntegracoes(env),
+    webhook: diagnosticoWebhook,
   });
 });
 
