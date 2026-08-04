@@ -4,7 +4,20 @@ import { supabaseAdmin } from '../../config/supabase.js';
 import { listarCardapio } from '../cardapio/cardapio-repo.js';
 import { montarTextoDoCardapio } from '../cardapio/cardapio-para-ia.js';
 
-const openai = env.OPENAI_API_KEY ? new OpenAI({ apiKey: env.OPENAI_API_KEY }) : null;
+let instancia: OpenAI | null = null;
+
+/** Único ponto do sistema que conhece a chave da OpenAI. */
+function getOpenAI(): OpenAI {
+  if (!env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY não configurada. Atendimento por IA indisponível.');
+  }
+
+  if (!instancia) {
+    instancia = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  }
+
+  return instancia;
+}
 
 interface ProcessCustomerMessageParams {
   restauranteId: string;
@@ -20,12 +33,7 @@ interface ProcessCustomerMessageParams {
 export async function processCustomerMessageWithAI(params: ProcessCustomerMessageParams) {
   const { restauranteId, telefoneCliente, mensagemTexto, historicoConversa = [] } = params;
 
-  if (!openai) {
-    return {
-      respostaTexto: `Olá! Seu pedido de "${mensagemTexto}" foi anotado. O total fica R$ 45,00. Segue a chave Pix Copia e Cola para pagamento.`,
-      pedidoCriado: null,
-    };
-  }
+  const openai = getOpenAI();
 
   // 1. Busca dados do Restaurante & Cardápio no banco (usando supabaseAdmin pois é contexto de webhook)
   const { data: restaurante } = await supabaseAdmin
