@@ -48,6 +48,7 @@ import {
 } from './services/cardapio/cardapio-repo.js';
 import { precoValido } from './services/cardapio/validacao-preco.js';
 import { testarConexao, salvarConexao, estadoDaConexao } from './services/whatsapp/conexao.js';
+import { statusIntegracoes } from './services/diagnostico/status-integracoes.js';
 
 const app = express();
 
@@ -1373,7 +1374,16 @@ app.post('/api/atendimento/conversas/:telefone/controle', autenticar, exigirAssi
 
 // Healthcheck
 app.get('/health', (req, res) => {
-  res.json({ status: 'online', timestamp: new Date().toISOString() });
+  // Rota pública. A lógica de quais integrações estão configuradas fica em
+  // statusIntegracoes (services/diagnostico) — testável isolada, e com o
+  // aviso de "só booleanos" documentado lá. Serve para o dono conferir o
+  // ambiente do Render sem abrir o painel, e é o diagnóstico de conexão
+  // que a submissão do App Review da Meta pede.
+  res.json({
+    status: 'online',
+    timestamp: new Date().toISOString(),
+    integracoes: statusIntegracoes(env),
+  });
 });
 
 const PORT = env.PORT || 3000;

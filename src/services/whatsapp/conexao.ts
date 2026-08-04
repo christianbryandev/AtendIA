@@ -68,9 +68,27 @@ export async function testarConexao(phoneNumberId: string, token: string): Promi
 export async function salvarConexao(restauranteId: string, phoneNumberId: string, token: string): Promise<void> {
   const tokenCifrado = encrypt(token);
 
+  // Busca o telefone legível da Meta (display_phone_number) para gravar
+  // junto, e a tela nunca mais precisar exibir o ID numérico como se
+  // fosse o telefone. testarConexao nunca lança — se a Meta não
+  // responder bem aqui, a conexão ainda é salva (o fluxo de teste
+  // manual continua separado), só sem o telefone legível até o
+  // próximo salvamento bem-sucedido.
+  const resultadoTeste = await testarConexao(phoneNumberId, token);
+  const displayPhoneNumber = resultadoTeste.ok ? resultadoTeste.numero : null;
+  if (!resultadoTeste.ok) {
+    console.warn(
+      `[WhatsApp] Não foi possível obter o telefone legível ao salvar a conexão do restaurante ${restauranteId}: ${resultadoTeste.erro}`,
+    );
+  }
+
   const { error } = await supabaseAdmin
     .from('restaurantes')
-    .update({ meta_phone_number_id: phoneNumberId, meta_access_token: tokenCifrado })
+    .update({
+      meta_phone_number_id: phoneNumberId,
+      meta_access_token: tokenCifrado,
+      meta_display_phone_number: displayPhoneNumber,
+    })
     .eq('id', restauranteId);
 
   if (error) throw error;
@@ -78,17 +96,22 @@ export async function salvarConexao(restauranteId: string, phoneNumberId: string
 
 /**
  * Estado atual da conexão para exibir no painel. Nunca devolve o token,
- * nem cifrado — só se está conectado e qual o número.
+ * nem cifrado — só se está conectado e o telefone legível (quando
+ * disponível). Não seleciona meta_phone_number_id para exibição: esse
+ * campo é o ID técnico da Meta, não um telefone, e mostrá-lo ao lojista
+ * foi o próprio achado que esta migration corrige.
  */
 export async function estadoDaConexao(restauranteId: string): Promise<{ conectado: boolean; numero: string | null }> {
   const { data, error } = await supabaseAdmin
     .from('restaurantes')
-    .select('meta_phone_number_id')
+    .select('meta_phone_number_id, meta_display_phone_number')
     .eq('id', restauranteId)
     .single();
 
   if (error) throw error;
 
-  const numero = (data as { meta_phone_number_id: string | null } | null)?.meta_phone_number_id ?? null;
-  return { conectado: !!numero, numero };
+  const linha = data as { meta_phone_number_id: string | null; meta_display_phone_number: string | null } | null;
+  const conectado = !!linha?.meta_phone_number_id;
+  const numero = linha?.meta_display_phone_number ?? null;
+  return { conectado, numero };
 }

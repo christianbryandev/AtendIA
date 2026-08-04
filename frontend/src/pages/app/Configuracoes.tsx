@@ -149,9 +149,17 @@ export default function Configuracoes() {
 
             <p className="mt-2 text-sm text-ink-600">
               {estado?.conectado ? (
-                <>
-                  Conectado ao número <strong className="text-ink-800">{estado.numero}</strong>.
-                </>
+                estado.numero ? (
+                  <>
+                    Conectado ao número <strong className="text-ink-800">{estado.numero}</strong>.
+                  </>
+                ) : (
+                  // Conexão salva antes da migration do telefone legível (ou cujo
+                  // último salvamento não conseguiu falar com a Meta): não
+                  // mostramos o ID técnico nem uma string vazia, só pedimos para
+                  // salvar de novo, o que atualiza o telefone exibido.
+                  'Conectado, mas ainda não temos o telefone para exibir. Salve a conexão novamente para atualizar.'
+                )
               ) : (
                 'Nenhum número conectado ainda.'
               )}

@@ -24,7 +24,7 @@ beforeEach(() => {
   eqUpdateMock.mockResolvedValue({ error: null });
   selectMock.mockReturnValue({ eq: eqSelectMock });
   eqSelectMock.mockReturnValue({ single: singleMock });
-  singleMock.mockResolvedValue({ data: { meta_phone_number_id: null }, error: null });
+  singleMock.mockResolvedValue({ data: { meta_phone_number_id: null, meta_display_phone_number: null }, error: null });
 });
 
 afterEach(() => {
@@ -127,6 +127,14 @@ describe('testarConexao', () => {
 
 describe('salvarConexao', () => {
   it('grava o token cifrado, nunca em texto puro, e decrypt o recupera', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ display_phone_number: '+55 11 91234-5678' }),
+      }),
+    );
     const tokenOriginal = 'EAAG-token-secreto-da-meta';
 
     await salvarConexao('rest-1', '1234567890', tokenOriginal);
@@ -135,6 +143,7 @@ describe('salvarConexao', () => {
     const dadosGravados = updateMock.mock.calls[0][0] as {
       meta_phone_number_id: string;
       meta_access_token: string;
+      meta_display_phone_number: string | null;
     };
 
     expect(dadosGravados.meta_phone_number_id).toBe('1234567890');
@@ -144,7 +153,34 @@ describe('salvarConexao', () => {
     expect(eqUpdateMock).toHaveBeenCalledWith('id', 'rest-1');
   });
 
+  it('persiste o telefone legivel devolvido pela Meta ao testar a conexao', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ display_phone_number: '+55 11 91234-5678' }),
+      }),
+    );
+
+    await salvarConexao('rest-1', '1234567890', 'token-valido');
+
+    const dadosGravados = updateMock.mock.calls[0][0] as { meta_display_phone_number: string | null };
+    expect(dadosGravados.meta_display_phone_number).toBe('+55 11 91234-5678');
+  });
+
+  it('salva mesmo quando a Meta nao responde, mas sem telefone legivel', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNRESET')));
+
+    await salvarConexao('rest-1', '1234567890', 'token-qualquer');
+
+    const dadosGravados = updateMock.mock.calls[0][0] as { meta_display_phone_number: string | null };
+    expect(dadosGravados.meta_display_phone_number).toBeNull();
+    expect(updateMock).toHaveBeenCalledTimes(1);
+  });
+
   it('lanca quando o supabase devolve erro', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('sem rede')));
     eqUpdateMock.mockResolvedValue({ error: { message: 'falhou' } });
 
     await expect(salvarConexao('rest-1', '1234567890', 'token')).rejects.toBeTruthy();
@@ -153,23 +189,40 @@ describe('salvarConexao', () => {
 
 describe('estadoDaConexao', () => {
   it('devolve conectado:false quando nao ha numero salvo', async () => {
-    singleMock.mockResolvedValue({ data: { meta_phone_number_id: null }, error: null });
+    singleMock.mockResolvedValue({ data: { meta_phone_number_id: null, meta_display_phone_number: null }, error: null });
 
     const estado = await estadoDaConexao('rest-1');
 
     expect(estado).toEqual({ conectado: false, numero: null });
   });
 
-  it('devolve conectado:true e o numero quando ja ha conexao salva', async () => {
-    singleMock.mockResolvedValue({ data: { meta_phone_number_id: '1234567890' }, error: null });
+  it('devolve conectado:true e o telefone legivel quando ja ha conexao salva com a migration aplicada', async () => {
+    singleMock.mockResolvedValue({
+      data: { meta_phone_number_id: '1234567890', meta_display_phone_number: '+55 11 91234-5678' },
+      error: null,
+    });
 
     const estado = await estadoDaConexao('rest-1');
 
-    expect(estado).toEqual({ conectado: true, numero: '1234567890' });
+    expect(estado).toEqual({ conectado: true, numero: '+55 11 91234-5678' });
     expect(eqSelectMock).toHaveBeenCalledWith('id', 'rest-1');
   });
 
-  // Nunca deve devolver o token, nem cifrado: a query so pede a coluna do
+  // Conexões salvas antes da migration 012 (ou cujo último save falhou ao
+  // consultar a Meta) não têm meta_display_phone_number: o estado continua
+  // conectado, mas sem telefone para exibir — nunca cai de volta no ID.
+  it('devolve conectado:true e numero:null quando falta o telefone legivel (conexao anterior a migration)', async () => {
+    singleMock.mockResolvedValue({
+      data: { meta_phone_number_id: '1234567890', meta_display_phone_number: null },
+      error: null,
+    });
+
+    const estado = await estadoDaConexao('rest-1');
+
+    expect(estado).toEqual({ conectado: true, numero: null });
+  });
+
+  // Nunca deve devolver o token, nem cifrado: a query so pede as colunas do
   // numero de telefone.
   it('nunca seleciona a coluna do token', async () => {
     await estadoDaConexao('rest-1');
