@@ -14,6 +14,8 @@ import { AssinaturaProvider } from './contexts/AssinaturaContext';
 // LegalPage tambem e lazy: ela arrasta react-markdown + remark-gfm + os
 // tres documentos legais inteiros, que nenhum visitante da home precisa.
 const LegalPage = lazy(() => import('./pages/site/LegalPage'));
+const EsqueciSenha = lazy(() => import('./pages/site/EsqueciSenha'));
+const RedefinirSenha = lazy(() => import('./pages/site/RedefinirSenha'));
 const Login = lazy(() => import('./pages/app/Login'));
 const Dashboard = lazy(() => import('./pages/app/Dashboard'));
 const Crm = lazy(() => import('./pages/app/Crm'));
@@ -22,6 +24,9 @@ const Pagamento = lazy(() => import('./pages/app/Pagamento'));
 const Confirmando = lazy(() => import('./pages/app/Confirmando'));
 const Assinatura = lazy(() => import('./pages/app/Assinatura'));
 const Creditos = lazy(() => import('./pages/app/Creditos'));
+const Cardapio = lazy(() => import('./pages/app/Cardapio'));
+const Configuracoes = lazy(() => import('./pages/app/Configuracoes'));
+const Atendimento = lazy(() => import('./pages/app/Atendimento'));
 
 const Carregando = () => (
   <div className="py-24 text-center text-sm text-ink-600">Carregando…</div>
@@ -49,6 +54,8 @@ export default function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/sobre" element={<Sobre />} />
           <Route path="/cadastro" element={<Cadastro />} />
+          <Route path="/esqueci-senha" element={<EsqueciSenha />} />
+          <Route path="/redefinir-senha" element={<RedefinirSenha />} />
           <Route path="/termos" element={<LegalPage documento="termos" />} />
           <Route path="/privacidade" element={<LegalPage documento="privacidade" />} />
           <Route path="/exclusao-de-dados" element={<LegalPage documento="exclusao-de-dados" />} />
@@ -74,6 +81,9 @@ export default function App() {
             <Route path="/app/ifood" element={<Ifood />} />
             <Route path="/app/assinatura" element={<Assinatura />} />
             <Route path="/app/creditos" element={<Creditos />} />
+            <Route path="/app/cardapio" element={<Cardapio />} />
+            <Route path="/app/configuracoes" element={<Configuracoes />} />
+            <Route path="/app/atendimento" element={<Atendimento />} />
           </Route>
         </Route>
       </Routes>

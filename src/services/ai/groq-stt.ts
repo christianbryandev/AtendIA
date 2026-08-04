@@ -1,16 +1,26 @@
 import Groq from 'groq-sdk';
 import { env } from '../../config/env.js';
 
-const groq = env.GROQ_API_KEY ? new Groq({ apiKey: env.GROQ_API_KEY }) : null;
+let instancia: Groq | null = null;
+
+/** Único ponto do sistema que conhece a chave da Groq. */
+function getGroq(): Groq {
+  if (!env.GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY não configurada. Transcrição de áudio indisponível.');
+  }
+
+  if (!instancia) {
+    instancia = new Groq({ apiKey: env.GROQ_API_KEY });
+  }
+
+  return instancia;
+}
 
 /**
  * Transcreve um arquivo de áudio (Buffer/Stream) para texto usando o modelo Whisper v3 da Groq.
  */
 export async function transcribeAudioWithGroq(audioBuffer: Buffer, fileName = 'audio.ogg'): Promise<string> {
-  if (!groq) {
-    console.warn('[Groq STT] GROQ_API_KEY não configurada. Usando transcrição simulada.');
-    return 'Gostaria de pedir um X-Bacon com fritas e uma Coca-Cola 350ml.';
-  }
+  const groq = getGroq();
 
   try {
     // Converter Buffer em objeto File sintético para a API do Groq usando Groq.toFile

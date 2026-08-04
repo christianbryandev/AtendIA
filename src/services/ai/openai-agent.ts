@@ -1,8 +1,23 @@
 import OpenAI from 'openai';
 import { env } from '../../config/env.js';
 import { supabaseAdmin } from '../../config/supabase.js';
+import { listarCardapio } from '../cardapio/cardapio-repo.js';
+import { montarTextoDoCardapio } from '../cardapio/cardapio-para-ia.js';
 
-const openai = env.OPENAI_API_KEY ? new OpenAI({ apiKey: env.OPENAI_API_KEY }) : null;
+let instancia: OpenAI | null = null;
+
+/** Único ponto do sistema que conhece a chave da OpenAI. */
+function getOpenAI(): OpenAI {
+  if (!env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY não configurada. Atendimento por IA indisponível.');
+  }
+
+  if (!instancia) {
+    instancia = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  }
+
+  return instancia;
+}
 
 interface ProcessCustomerMessageParams {
   restauranteId: string;
@@ -18,12 +33,7 @@ interface ProcessCustomerMessageParams {
 export async function processCustomerMessageWithAI(params: ProcessCustomerMessageParams) {
   const { restauranteId, telefoneCliente, mensagemTexto, historicoConversa = [] } = params;
 
-  if (!openai) {
-    return {
-      respostaTexto: `Olá! Seu pedido de "${mensagemTexto}" foi anotado. O total fica R$ 45,00. Segue a chave Pix Copia e Cola para pagamento.`,
-      pedidoCriado: null,
-    };
-  }
+  const openai = getOpenAI();
 
   // 1. Busca dados do Restaurante & Cardápio no banco (usando supabaseAdmin pois é contexto de webhook)
   const { data: restaurante } = await supabaseAdmin
@@ -36,11 +46,8 @@ export async function processCustomerMessageWithAI(params: ProcessCustomerMessag
     throw new Error('Restaurante não encontrado na IA');
   }
 
-  const { data: produtos } = await supabaseAdmin
-    .from('produtos_cardapio')
-    .select('*')
-    .eq('restaurante_id', restauranteId)
-    .eq('disponivel', true);
+  const categorias = await listarCardapio(restauranteId);
+  const cardapioFormatado = montarTextoDoCardapio(categorias);
 
   // 2. Busca histórico do cliente no CRM
   const { data: clienteCrm } = await supabaseAdmin
@@ -49,10 +56,6 @@ export async function processCustomerMessageWithAI(params: ProcessCustomerMessag
     .eq('restaurante_id', restauranteId)
     .eq('telefone_whatsapp', telefoneCliente)
     .single();
-
-  const cardapioFormatado = (produtos || []).map(p => 
-    `- [ID: ${p.id}] ${p.nome} (${p.categoria}): R$ ${p.preco.toFixed(2)} | Descrição: ${p.descricao || 'Sem descrição'}`
-  ).join('\n');
 
   const historicoUltimoPedido = clienteCrm?.ultimo_pedido_json 
     ? JSON.stringify(clienteCrm.ultimo_pedido_json)

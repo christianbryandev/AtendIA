@@ -235,7 +235,7 @@ git commit -m "feat: Cria as tabelas de mensagens e conversas" -m "Co-Authored-B
 - Produces:
   - De `janela.js`: `type EstadoJanela = { aberta: boolean; expiraEm: Date | null; minutosRestantes: number }`; `calcularJanela(ultimaMensagemClienteEm: string | null, agora?: Date): EstadoJanela`
   - De `conversa-repo.js`: `type Conversa = { id: string; restauranteId: string; telefoneCliente: string; ultimaMensagemClienteEm: string | null; ultimaMensagemEm: string | null; sobControleHumano: boolean; controleAssumidoEm: string | null }`; `buscarConversa(restauranteId, telefone): Promise<Conversa | null>`; `registrarMensagemDoCliente(restauranteId, telefone, quando: string): Promise<void>`; `registrarMensagemNossa(restauranteId, telefone, quando: string): Promise<void>`; `definirControleHumano(restauranteId, telefone, humano: boolean): Promise<void>`; `listarConversas(restauranteId, limite?): Promise<Conversa[]>`
-  - De `mensagem-repo.js`: `type NovaMensagem = { restauranteId: string; telefoneCliente: string; direcao: 'recebida' | 'enviada'; autor: 'cliente' | 'ia' | 'lojista'; tipo?: 'texto' | 'audio'; texto?: string | null; transcricao?: string | null; audioUrl?: string | null; whatsappMessageId?: string | null; status?: 'ok' | 'enviando' | 'falha' }`; `gravarMensagem(m: NovaMensagem): Promise<string>` (devolve o id); `marcarStatus(id: string, status: 'ok' | 'falha', erro?: string): Promise<void>`; `ultimasMensagens(restauranteId, telefone, limite: number): Promise<{ autor: string; texto: string | null; transcricao: string | null }[]>`
+  - De `mensagem-repo.js`: `type NovaMensagem = { restauranteId: string; telefoneCliente: string; direcao: 'recebida' | 'enviada'; autor: 'cliente' | 'ia' | 'lojista'; tipo?: 'texto' | 'audio'; texto?: string | null; transcricao?: string | null; audioUrl?: string | null; whatsappMessageId?: string | null; status?: 'ok' | 'enviando' | 'falha' }`; `gravarMensagem(m: NovaMensagem): Promise<string>` (devolve o id); `marcarStatus(restauranteId: string, id: string, status: 'ok' | 'falha', erro?: string): Promise<void>`; `ultimasMensagens(restauranteId, telefone, limite: number): Promise<{ autor: string; texto: string | null; transcricao: string | null }[]>`
 
 - [ ] **Step 1: Escrever o teste da janela**
 
@@ -1301,11 +1301,11 @@ export async function enviarMensagemDoLojista(
       token,
     });
 
-    await marcarStatus(id, 'ok');
+    await marcarStatus(restauranteId, id, 'ok');
     await registrarMensagemNossa(restauranteId, telefone, new Date().toISOString());
     return { ok: true, id };
   } catch (erro: any) {
-    await marcarStatus(id, 'falha', erro?.message ?? 'Erro desconhecido');
+    await marcarStatus(restauranteId, id, 'falha', erro?.message ?? 'Erro desconhecido');
     return { ok: false, erro: 'Não foi possível entregar a mensagem. Tente novamente.' };
   }
 }

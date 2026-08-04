@@ -17,7 +17,7 @@ import { corsOptions } from './config/cors.js';
 import { supabase, supabaseAdmin, getTenantSupabaseClient } from './config/supabase.js';
 import { transcribeAudioWithGroq } from './services/ai/groq-stt.js';
 import { processCustomerMessageWithAI } from './services/ai/openai-agent.js';
-import { sendWhatsAppTextMessage, downloadWhatsAppMedia } from './services/whatsapp/meta-cloud-api.js';
+import { sendWhatsAppTextMessage } from './services/whatsapp/meta-cloud-api.js';
 import { upsertCustomerInCRM, runReactivationCampaign } from './services/crm/reactivation.js';
 import { importarCardapioiFood } from './services/ifood/ifood-api.js';
 import { decrypt } from './utils/crypto.js';
@@ -28,6 +28,27 @@ import { criarSessaoAssinatura, criarSessaoPacote, criarSessaoPortal } from './s
 import { webhookStripeHandler } from './services/billing/webhook-route.js';
 import { CREDITOS_DA_COTA } from './services/billing/cota.js';
 import { reconciliarSePreciso } from './services/billing/status.js';
+import { avisarCotaEsgotadaSeNecessario } from './services/billing/aviso-cota.js';
+import { gerarTokenRecuperacao, consumirTokenERedefinir } from './services/auth/recuperacao-senha.js';
+import { gravarMensagem, ultimasMensagens } from './services/conversas/mensagem-repo.js';
+import { buscarConversa, registrarMensagemDoCliente, registrarMensagemNossa, definirControleHumano, listarConversas } from './services/conversas/conversa-repo.js';
+import { decidirAtendimento, montarHistoricoParaIA } from './services/conversas/fluxo-webhook.js';
+import { enviarMensagemDoLojista } from './services/conversas/envio.js';
+import { calcularJanela } from './services/conversas/janela.js';
+import { buscarTrechosUltimaMensagem } from './services/conversas/trecho-conversa.js';
+import { salvarAudioDaMeta, urlAssinadaDoAudio } from './services/whatsapp/audio-storage.js';
+import {
+  listarCardapio,
+  criarCategoria,
+  atualizarCategoria,
+  removerCategoria,
+  criarProduto,
+  atualizarProduto,
+  removerProduto,
+} from './services/cardapio/cardapio-repo.js';
+import { precoValido } from './services/cardapio/validacao-preco.js';
+import { testarConexao, salvarConexao, estadoDaConexao } from './services/whatsapp/conexao.js';
+import { statusIntegracoes } from './services/diagnostico/status-integracoes.js';
 
 const app = express();
 
@@ -146,6 +167,72 @@ app.post('/webhook/whatsapp', (req, res) => {
             return;
           }
 
+          // 1b. GRAVA A MENSAGEM DO CLIENTE E AVALIA CONTROLE HUMANO
+          // Grava a mensagem ANTES de qualquer processamento. Se a IA
+          // falhar, a mensagem do cliente continua registrada e visível
+          // na caixa de entrada — o lojista vê que alguém falou com ele
+          // e pode responder na mão. Gravando depois, uma falha da IA
+          // faria a mensagem sumir sem deixar rastro.
+          const agoraIso = new Date().toISOString();
+          const audioId = message.audio?.id;
+          let audioCaminho: string | null = null;
+          // Guarda o buffer já baixado para reaproveitar na transcrição
+          // logo abaixo, em vez de baixar o mesmo áudio da Meta de novo.
+          let audioBufferBaixado: Buffer | null = null;
+
+          if (messageType === 'audio' && audioId) {
+            const resultado = await salvarAudioDaMeta(audioId, metaToken, restauranteId);
+            audioCaminho = resultado.caminho;
+            audioBufferBaixado = resultado.buffer;
+          }
+
+          // Bloco protegido: gravarMensagem, registrarMensagemDoCliente,
+          // buscarConversa e definirControleHumano lançam em erro do
+          // Supabase (padrão do projeto). Sem este try/catch, uma falha
+          // transitória aqui fazia a mensagem do cliente sumir em
+          // silêncio — pega só pelo catch mais externo do setImmediate,
+          // que apenas loga e não responde nada ao cliente.
+          let idMensagemCliente: string | undefined;
+          let decisaoAtendimento: ReturnType<typeof decidirAtendimento>;
+          try {
+            idMensagemCliente = await gravarMensagem({
+              restauranteId,
+              telefoneCliente: fromPhone,
+              direcao: 'recebida',
+              autor: 'cliente',
+              tipo: messageType === 'audio' ? 'audio' : 'texto',
+              texto: messageType === 'text' ? message.text.body : null,
+              audioUrl: audioCaminho,
+              whatsappMessageId: messageId,
+            });
+
+            await registrarMensagemDoCliente(restauranteId, fromPhone, agoraIso);
+
+            // Conversa sob controle humano: a IA não responde e não gasta
+            // crédito. A devolução automática é avaliada aqui, na chegada
+            // da mensagem, em vez de por agendador.
+            const conversa = await buscarConversa(restauranteId, fromPhone);
+            decisaoAtendimento = decidirAtendimento(conversa);
+
+            if (decisaoAtendimento.devolverControle) {
+              await definirControleHumano(restauranteId, fromPhone, false);
+            }
+          } catch (registroError) {
+            console.error(`[Webhook] Falha ao registrar mensagem/avaliar controle humano para ${fromPhone} (restaurante ${restauranteId}):`, registroError);
+            await sendWhatsAppTextMessage({
+              toPhoneNumber: fromPhone,
+              text: 'Nosso atendimento automático está temporariamente indisponível. Entre em contato diretamente com a loja.',
+              phoneNumberId: fromPhoneNumberId,
+              token: metaToken
+            });
+            return;
+          }
+
+          if (!decisaoAtendimento.iaResponde) {
+            console.log(`[Webhook] Conversa ${fromPhone} sob controle do lojista. IA nao responde.`);
+            return;
+          }
+
           // 2. CÁLCULO E CONSUMO DE CRÉDITOS (ANTES DE PROCESSAR)
           // 8 para áudio, alinhado com o que a landing vende. O número reflete o
           // custo real de STT + LLM + TTS; o TTS ainda não está ligado (ciclo 3),
@@ -160,6 +247,15 @@ app.post('/webhook/whatsapp', (req, res) => {
 
           if (erroCreditos || !creditosAprovados) {
             console.log(`[Webhook] Restaurante ${restauranteId} sem créditos suficientes. Abortando IA.`);
+
+            // Só avisa por e-mail quando a RPC respondeu de verdade que o
+            // saldo acabou (creditosAprovados === false). Um erro de
+            // infraestrutura (erroCreditos truthy) não significa que a
+            // cota esgotou, e não deve disparar o aviso.
+            if (!erroCreditos && !creditosAprovados) {
+              await avisarCotaEsgotadaSeNecessario(restauranteId);
+            }
+
             await sendWhatsAppTextMessage({
               toPhoneNumber: fromPhone,
               text: 'Nosso atendimento automático está temporariamente indisponível. Entre em contato diretamente com a loja.',
@@ -175,11 +271,20 @@ app.post('/webhook/whatsapp', (req, res) => {
             let textoEntrada = '';
 
             if (messageType === 'audio') {
-              console.log(`[Áudio Assíncrono] De: ${fromPhone} | Baixando da Meta e Transcrevendo...`);
-              const audioId = message.audio?.id;
-              if (audioId) {
-                const audioBuffer = await downloadWhatsAppMedia(audioId, metaToken);
-                textoEntrada = await transcribeAudioWithGroq(audioBuffer, 'audio.ogg');
+              console.log(`[Áudio Assíncrono] De: ${fromPhone} | Transcrevendo...`);
+              // Reaproveita o buffer baixado em salvarAudioDaMeta (acima) em vez de
+              // baixar o mesmo áudio da Meta de novo — evita dobrar a latência do
+              // atendimento por áudio e uma segunda dependência do link que expira.
+              if (audioBufferBaixado) {
+                textoEntrada = await transcribeAudioWithGroq(audioBufferBaixado, 'audio.ogg');
+
+                if (idMensagemCliente && textoEntrada) {
+                  await supabaseAdmin
+                    .from('mensagens')
+                    .update({ transcricao: textoEntrada })
+                    .eq('restaurante_id', restauranteId)
+                    .eq('id', idMensagemCliente);
+                }
               }
             } else if (messageType === 'text') {
               textoEntrada = message.text.body;
@@ -193,10 +298,19 @@ app.post('/webhook/whatsapp', (req, res) => {
                 telefoneWhatsApp: fromPhone,
               });
 
+              const historico = await ultimasMensagens(restauranteId, fromPhone, 20);
+
+              // Remove a mensagem atual (já será enviada separadamente como
+              // mensagemTexto) e converte para o formato que a IA espera.
+              // Lógica extraída para montarHistoricoParaIA por ser testável
+              // sem subir servidor nem simular a Meta.
+              const historicoParaIA = montarHistoricoParaIA(historico, idMensagemCliente);
+
               const { respostaTexto } = await processCustomerMessageWithAI({
                 restauranteId,
                 telefoneCliente: fromPhone,
                 mensagemTexto: textoEntrada,
+                historicoConversa: historicoParaIA,
               });
 
               await sendWhatsAppTextMessage({
@@ -205,6 +319,15 @@ app.post('/webhook/whatsapp', (req, res) => {
                 phoneNumberId: fromPhoneNumberId,
                 token: metaToken
               });
+
+              await gravarMensagem({
+                restauranteId,
+                telefoneCliente: fromPhone,
+                direcao: 'enviada',
+                autor: 'ia',
+                texto: respostaTexto,
+              });
+              await registrarMensagemNossa(restauranteId, fromPhone, new Date().toISOString());
             } else {
               console.log(`[Webhook] Mensagem ignorada (tipo não suportado ou vazia). Reembolsando.`);
               
@@ -486,6 +609,86 @@ app.post('/api/auth/cadastro', async (req, res) => {
   );
 
   return res.status(201).json({ success: true, token, expiresIn: 43200 });
+});
+
+// ------------------------------------------------------------------
+// 3.2.1 RECUPERAÇÃO DE SENHA
+// ------------------------------------------------------------------
+// Nenhuma das duas rotas passa por `autenticar`: quem esqueceu a senha,
+// por definição, não tem sessão.
+
+// Limite de tentativas por e-mail, em memória: sem isso o formulário de
+// "esqueci minha senha" vira uma ferramenta de spam contra os próprios
+// clientes, disparando e-mail de recuperação repetidamente para o
+// mesmo endereço. O backend roda como um processo só, então perder
+// esse estado num restart é inofensivo — o pior caso é a janela de
+// limite reabrir mais cedo.
+const LIMITE_TENTATIVAS_RECUPERACAO = 3;
+const JANELA_TENTATIVAS_RECUPERACAO_MS = 15 * 60 * 1000; // 15 minutos
+const tentativasRecuperacaoPorEmail = new Map<string, { contagem: number; desde: number }>();
+
+function podeTentarRecuperacao(email: string): boolean {
+  const agora = Date.now();
+  const chave = email.trim().toLowerCase();
+  const registro = tentativasRecuperacaoPorEmail.get(chave);
+
+  if (!registro || agora - registro.desde >= JANELA_TENTATIVAS_RECUPERACAO_MS) {
+    tentativasRecuperacaoPorEmail.set(chave, { contagem: 1, desde: agora });
+    return true;
+  }
+
+  if (registro.contagem >= LIMITE_TENTATIVAS_RECUPERACAO) {
+    return false;
+  }
+
+  registro.contagem += 1;
+  return true;
+}
+
+// Resposta idêntica exista a conta ou não — mesmo cuidado já adotado no
+// login (e-mail ou senha inválidos, sem dizer qual) e no CNPJ duplicado
+// do cadastro. Sem isso, qualquer pessoa descobre quais e-mails são
+// clientes testando um por um.
+const MENSAGEM_ESQUECI_SENHA = 'Se este e-mail estiver cadastrado, você receberá as instruções.';
+
+app.post('/api/auth/esqueci-senha', async (req, res) => {
+  const { email } = req.body;
+
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ success: false, error: 'E-mail é obrigatório.' });
+  }
+
+  // O limite de tentativas também não pode vazar informação: quando
+  // excedido, simplesmente pula a geração do token e devolve a mesma
+  // resposta de sempre.
+  if (podeTentarRecuperacao(email)) {
+    await gerarTokenRecuperacao(email);
+  }
+
+  return res.json({ success: true, message: MENSAGEM_ESQUECI_SENHA });
+});
+
+app.post('/api/auth/redefinir-senha', async (req, res) => {
+  const { token, senha } = req.body;
+
+  if (!token || typeof token !== 'string' || !senha || typeof senha !== 'string') {
+    return res.status(400).json({ success: false, error: 'Token e nova senha são obrigatórios.' });
+  }
+
+  if (senha.length < 8) {
+    return res.status(400).json({ success: false, error: 'A senha precisa ter ao menos 8 caracteres.' });
+  }
+
+  const sucesso = await consumirTokenERedefinir(token, senha);
+
+  if (!sucesso) {
+    return res.status(400).json({
+      success: false,
+      error: 'Link inválido ou expirado. Solicite uma nova recuperação de senha.',
+    });
+  }
+
+  return res.json({ success: true, message: 'Senha redefinida com sucesso.' });
 });
 
 // ------------------------------------------------------------------
@@ -891,9 +1094,296 @@ app.put('/api/pdv/pedidos/:id/status', autenticar, exigirAssinaturaAtiva, async 
   }
 });
 
+// ============================================================
+// ROTAS DE CARDÁPIO (CATEGORIAS E PRODUTOS)
+// ============================================================
+
+app.get('/api/cardapio', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const categorias = await listarCardapio(req.restauranteId!);
+    return res.json({ categorias });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao listar cardápio:', err);
+    return res.status(500).json({ error: 'Erro ao buscar o cardápio.' });
+  }
+});
+
+app.post('/api/cardapio/categorias', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const { nome, ordem } = req.body;
+    if (!nome || typeof nome !== 'string' || !nome.trim()) {
+      return res.status(400).json({ error: 'Nome da categoria é obrigatório.' });
+    }
+
+    const categoria = await criarCategoria(req.restauranteId!, nome.trim(), ordem ?? 0);
+    return res.status(201).json({ categoria });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao criar categoria:', err);
+    return res.status(500).json({ error: 'Erro ao criar a categoria.' });
+  }
+});
+
+app.put('/api/cardapio/categorias/:id', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const categoriaId = req.params.id as string;
+    const { nome, ordem } = req.body;
+    if (nome !== undefined && (typeof nome !== 'string' || !nome.trim())) {
+      return res.status(400).json({ error: 'Nome da categoria inválido.' });
+    }
+
+    await atualizarCategoria(req.restauranteId!, categoriaId, { nome: nome?.trim(), ordem });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao atualizar categoria:', err);
+    return res.status(500).json({ error: 'Erro ao atualizar a categoria.' });
+  }
+});
+
+app.delete('/api/cardapio/categorias/:id', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const categoriaId = req.params.id as string;
+    await removerCategoria(req.restauranteId!, categoriaId);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Cardápio] Erro ao remover categoria:', err);
+    return res.status(400).json({ error: err.message || 'Erro ao remover a categoria.' });
+  }
+});
+
+app.post('/api/cardapio/produtos', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const { categoriaId, nome, descricao, preco, ordem } = req.body;
+    if (!nome || typeof nome !== 'string' || !nome.trim()) {
+      return res.status(400).json({ error: 'Nome do produto é obrigatório.' });
+    }
+    if (!precoValido(preco)) {
+      return res.status(400).json({ error: 'Preço inválido: deve ser um número positivo com no máximo duas casas decimais.' });
+    }
+
+    const produto = await criarProduto(req.restauranteId!, {
+      categoriaId: categoriaId ?? null,
+      nome: nome.trim(),
+      descricao: descricao ?? null,
+      preco,
+      ordem: ordem ?? 0,
+    });
+    return res.status(201).json({ produto });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao criar produto:', err);
+    return res.status(500).json({ error: 'Erro ao criar o produto.' });
+  }
+});
+
+app.put('/api/cardapio/produtos/:id', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const produtoId = req.params.id as string;
+    const { categoriaId, nome, descricao, preco, disponivel, ordem } = req.body;
+    if (nome !== undefined && (typeof nome !== 'string' || !nome.trim())) {
+      return res.status(400).json({ error: 'Nome do produto inválido.' });
+    }
+    if (preco !== undefined && !precoValido(preco)) {
+      return res.status(400).json({ error: 'Preço inválido: deve ser um número positivo com no máximo duas casas decimais.' });
+    }
+
+    await atualizarProduto(req.restauranteId!, produtoId, {
+      categoriaId,
+      nome: nome?.trim(),
+      descricao,
+      preco,
+      disponivel,
+      ordem,
+    });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao atualizar produto:', err);
+    return res.status(500).json({ error: 'Erro ao atualizar o produto.' });
+  }
+});
+
+app.delete('/api/cardapio/produtos/:id', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const produtoId = req.params.id as string;
+    await removerProduto(req.restauranteId!, produtoId);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[Cardápio] Erro ao remover produto:', err);
+    return res.status(500).json({ error: 'Erro ao remover o produto.' });
+  }
+});
+
+// ============================================================
+// ROTAS DE CONEXÃO COM O WHATSAPP (META CLOUD API)
+// ============================================================
+// Conexão manual: a verificação de "provedora de tecnologia" da Meta
+// ainda está em análise. Enquanto não sair, o lojista cola o ID do
+// número e o token que ele mesmo obteve no painel da Meta.
+
+app.get('/api/whatsapp/conexao', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const estado = await estadoDaConexao(req.restauranteId!);
+    return res.json(estado);
+  } catch (err) {
+    console.error('[WhatsApp] Erro ao buscar estado da conexão:', err);
+    return res.status(500).json({ error: 'Erro ao buscar o estado da conexão.' });
+  }
+});
+
+app.post('/api/whatsapp/conexao/testar', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const { phoneNumberId, token } = req.body;
+    if (!phoneNumberId || typeof phoneNumberId !== 'string' || !token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'Informe o ID do número e o token.' });
+    }
+
+    const resultado = await testarConexao(phoneNumberId, token);
+    return res.json(resultado);
+  } catch (err) {
+    console.error('[WhatsApp] Erro ao testar conexão:', err);
+    return res.status(500).json({ error: 'Erro ao testar a conexão.' });
+  }
+});
+
+app.post('/api/whatsapp/conexao', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const { phoneNumberId, token } = req.body;
+    if (!phoneNumberId || typeof phoneNumberId !== 'string' || !token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'Informe o ID do número e o token.' });
+    }
+
+    await salvarConexao(req.restauranteId!, phoneNumberId, token);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[WhatsApp] Erro ao salvar conexão:', err);
+    return res.status(500).json({ error: 'Erro ao salvar a conexão.' });
+  }
+});
+
+// ============================================================
+// ROTAS DA CAIXA DE ENTRADA (ATENDIMENTO)
+// ============================================================
+// A tela do lojista consome estas rotas para ver as conversas e assumir
+// o atendimento na mão quando a IA não dá conta. A checagem da janela de
+// 24h da Meta acontece dentro de enviarMensagemDoLojista, não aqui — é
+// ela que decide se a mensagem pode sair de verdade.
+
+// Lista as conversas do restaurante, com o estado da janela já calculado
+// e o nome do cliente vindo do CRM.
+app.get('/api/atendimento/conversas', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const restauranteId = req.restauranteId!;
+    const conversas = await listarConversas(restauranteId);
+
+    const telefones = conversas.map((c) => c.telefoneCliente);
+    const { data: clientes, error } = await supabaseAdmin
+      .from('clientes_crm')
+      .select('telefone_whatsapp, nome')
+      .eq('restaurante_id', restauranteId)
+      .in('telefone_whatsapp', telefones.length > 0 ? telefones : ['']);
+
+    if (error) throw error;
+
+    const nomePorTelefone = new Map((clientes ?? []).map((c) => [c.telefone_whatsapp, c.nome]));
+    const trechoPorTelefone = await buscarTrechosUltimaMensagem(restauranteId, telefones);
+
+    const resposta = conversas.map((conversa) => ({
+      ...conversa,
+      nomeCliente: nomePorTelefone.get(conversa.telefoneCliente) ?? null,
+      trechoUltimaMensagem: trechoPorTelefone.get(conversa.telefoneCliente) ?? null,
+      janela: calcularJanela(conversa.ultimaMensagemClienteEm),
+    }));
+
+    return res.json({ conversas: resposta });
+  } catch (err) {
+    console.error('[Atendimento] Erro ao listar conversas:', err);
+    return res.status(500).json({ error: 'Erro ao buscar as conversas.' });
+  }
+});
+
+// Histórico de mensagens de uma conversa, com URL assinada para os áudios.
+app.get('/api/atendimento/conversas/:telefone/mensagens', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const restauranteId = req.restauranteId!;
+    const telefone = req.params.telefone;
+
+    const { data: mensagens, error } = await supabaseAdmin
+      .from('mensagens')
+      .select('id, direcao, autor, tipo, texto, transcricao, audio_url, status, erro_envio, created_at')
+      .eq('restaurante_id', restauranteId)
+      .eq('telefone_cliente', telefone)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    const comAudio = await Promise.all(
+      (mensagens ?? []).map(async (m) => ({
+        ...m,
+        audioUrlAssinada: m.tipo === 'audio' && m.audio_url ? await urlAssinadaDoAudio(m.audio_url) : null,
+      })),
+    );
+
+    return res.json({ mensagens: comAudio });
+  } catch (err) {
+    console.error('[Atendimento] Erro ao buscar histórico da conversa:', err);
+    return res.status(500).json({ error: 'Erro ao buscar o histórico da conversa.' });
+  }
+});
+
+// Envia uma mensagem escrita pelo lojista. A trava da janela de 24h da
+// Meta acontece dentro de enviarMensagemDoLojista.
+app.post('/api/atendimento/conversas/:telefone/mensagens', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const restauranteId = req.restauranteId!;
+    const telefone = String(req.params.telefone);
+    const { texto } = req.body;
+
+    if (!texto || typeof texto !== 'string' || !texto.trim()) {
+      return res.status(400).json({ error: 'Informe o texto da mensagem.' });
+    }
+
+    const resultado = await enviarMensagemDoLojista(restauranteId, telefone, texto.trim());
+
+    if (!resultado.ok) {
+      return res.status(400).json({ error: resultado.erro });
+    }
+
+    return res.json({ success: true, id: resultado.id });
+  } catch (err) {
+    console.error('[Atendimento] Erro ao enviar mensagem do lojista:', err);
+    return res.status(500).json({ error: 'Erro ao enviar a mensagem.' });
+  }
+});
+
+// Assume ou devolve o controle humano da conversa.
+app.post('/api/atendimento/conversas/:telefone/controle', autenticar, exigirAssinaturaAtiva, async (req, res) => {
+  try {
+    const restauranteId = req.restauranteId!;
+    const telefone = String(req.params.telefone);
+    const { humano } = req.body;
+
+    if (typeof humano !== 'boolean') {
+      return res.status(400).json({ error: 'Informe o campo "humano" como booleano.' });
+    }
+
+    await definirControleHumano(restauranteId, telefone, humano);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[Atendimento] Erro ao definir o controle da conversa:', err);
+    return res.status(500).json({ error: 'Erro ao atualizar o controle da conversa.' });
+  }
+});
+
 // Healthcheck
 app.get('/health', (req, res) => {
-  res.json({ status: 'online', timestamp: new Date().toISOString() });
+  // Rota pública. A lógica de quais integrações estão configuradas fica em
+  // statusIntegracoes (services/diagnostico) — testável isolada, e com o
+  // aviso de "só booleanos" documentado lá. Serve para o dono conferir o
+  // ambiente do Render sem abrir o painel, e é o diagnóstico de conexão
+  // que a submissão do App Review da Meta pede.
+  res.json({
+    status: 'online',
+    timestamp: new Date().toISOString(),
+    integracoes: statusIntegracoes(env),
+  });
 });
 
 const PORT = env.PORT || 3000;

@@ -68,6 +68,12 @@ const envSchema = z.object({
   STRIPE_PRICE_CREDITOS_2500: z.string().optional(),
   STRIPE_PRICE_CREDITOS_5000: z.string().optional(),
   STRIPE_PRICE_CREDITOS_10000: z.string().optional(),
+  // Opcional pelo mesmo motivo das chaves do Stripe acima: o Resend ainda
+  // não foi contratado e o domínio ainda não foi verificado (pendência do
+  // dono do projeto), e o servidor precisa continuar subindo sem ela.
+  // getResend() (src/services/email/resend-client.ts) falha com mensagem
+  // clara na hora de enviar — não no boot.
+  RESEND_API_KEY: z.string().optional(),
   // Normalizada para a origem pura (esquema://host[:porta], sem barra final
   // e sem caminho) via `new URL(...).origin`. Isso existe por causa de um bug
   // real: se APP_URL for configurada no Render com barra final (por exemplo

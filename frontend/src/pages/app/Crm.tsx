@@ -101,7 +101,7 @@ export default function Crm() {
       <div className="mx-auto flex h-full max-w-full flex-col">
         <header className="mb-8 flex flex-col justify-between border-b border-gray-200 pb-4 md:flex-row md:items-center">
           <div className="mb-4 md:mb-0">
-            <h1 className="text-2xl font-bold text-sky-600">📊 Kanban de Vendas e CRM</h1>
+            <h1 className="text-2xl font-bold text-brand-700">📊 Kanban de Vendas e CRM</h1>
             <p className="mt-1 text-sm text-gray-500">
               Pipeline de clientes 100% automatizado por eventos
             </p>
