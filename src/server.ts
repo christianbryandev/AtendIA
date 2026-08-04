@@ -185,27 +185,46 @@ app.post('/webhook/whatsapp', (req, res) => {
             audioBufferBaixado = resultado.buffer;
           }
 
-          const idMensagemCliente = await gravarMensagem({
-            restauranteId,
-            telefoneCliente: fromPhone,
-            direcao: 'recebida',
-            autor: 'cliente',
-            tipo: messageType === 'audio' ? 'audio' : 'texto',
-            texto: messageType === 'text' ? message.text.body : null,
-            audioUrl: audioCaminho,
-            whatsappMessageId: messageId,
-          });
+          // Bloco protegido: gravarMensagem, registrarMensagemDoCliente,
+          // buscarConversa e definirControleHumano lançam em erro do
+          // Supabase (padrão do projeto). Sem este try/catch, uma falha
+          // transitória aqui fazia a mensagem do cliente sumir em
+          // silêncio — pega só pelo catch mais externo do setImmediate,
+          // que apenas loga e não responde nada ao cliente.
+          let idMensagemCliente: string | undefined;
+          let decisaoAtendimento: ReturnType<typeof decidirAtendimento>;
+          try {
+            idMensagemCliente = await gravarMensagem({
+              restauranteId,
+              telefoneCliente: fromPhone,
+              direcao: 'recebida',
+              autor: 'cliente',
+              tipo: messageType === 'audio' ? 'audio' : 'texto',
+              texto: messageType === 'text' ? message.text.body : null,
+              audioUrl: audioCaminho,
+              whatsappMessageId: messageId,
+            });
 
-          await registrarMensagemDoCliente(restauranteId, fromPhone, agoraIso);
+            await registrarMensagemDoCliente(restauranteId, fromPhone, agoraIso);
 
-          // Conversa sob controle humano: a IA não responde e não gasta
-          // crédito. A devolução automática é avaliada aqui, na chegada
-          // da mensagem, em vez de por agendador.
-          const conversa = await buscarConversa(restauranteId, fromPhone);
-          const decisaoAtendimento = decidirAtendimento(conversa);
+            // Conversa sob controle humano: a IA não responde e não gasta
+            // crédito. A devolução automática é avaliada aqui, na chegada
+            // da mensagem, em vez de por agendador.
+            const conversa = await buscarConversa(restauranteId, fromPhone);
+            decisaoAtendimento = decidirAtendimento(conversa);
 
-          if (decisaoAtendimento.devolverControle) {
-            await definirControleHumano(restauranteId, fromPhone, false);
+            if (decisaoAtendimento.devolverControle) {
+              await definirControleHumano(restauranteId, fromPhone, false);
+            }
+          } catch (registroError) {
+            console.error(`[Webhook] Falha ao registrar mensagem/avaliar controle humano para ${fromPhone} (restaurante ${restauranteId}):`, registroError);
+            await sendWhatsAppTextMessage({
+              toPhoneNumber: fromPhone,
+              text: 'Nosso atendimento automático está temporariamente indisponível. Entre em contato diretamente com a loja.',
+              phoneNumberId: fromPhoneNumberId,
+              token: metaToken
+            });
+            return;
           }
 
           if (!decisaoAtendimento.iaResponde) {
