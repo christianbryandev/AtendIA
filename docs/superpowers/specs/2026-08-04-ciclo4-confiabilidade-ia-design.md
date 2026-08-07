@@ -1,9 +1,26 @@
-# Ciclo 4 — Confiabilidade da IA: horário, honestidade e mídia
+# Ciclo 4 — Confiabilidade da IA e do CRM
 
-**Data:** 04/08/2026
+**Data:** 04/08/2026 (ampliado em 07/08/2026)
 **Estado:** aprovado, pronto para virar plano
 
-## Problema
+## Problema mais grave, descoberto em 07/08: o CRM nunca funcionou
+
+A tela de CRM mostra zero clientes. A tabela `clientes_crm` está **vazia**, mesmo depois de conversas reais em produção.
+
+Causa raiz: `src/services/crm/reactivation.ts` importa **`supabase`** (o cliente **anon**) em vez de `supabaseAdmin`. O webhook roda no servidor, sem JWT de usuário, então a RLS bloqueia todo insert. E **nenhuma das cinco consultas do arquivo verifica o `error`** — a falha é engolida, `upsertCustomerInCRM` devolve `undefined`, e o webhook segue como se tivesse dado certo.
+
+É o mesmo defeito que causou três problemas no ciclo 3 — descartar o `error` do Supabase — num módulo que nunca passou por revisão.
+
+**Isso compromete três itens do contrato de uma vez: CRM, fidelização e campanhas de reativação.** Nenhum deles pode funcionar sobre uma base de contatos vazia.
+
+No mesmo arquivo, mais dois defeitos:
+
+- **`runReactivationCampaign` envia texto livre, não template.** Reativação é, por definição, para cliente ausente há 15 ou 30 dias — ou seja, **sempre fora da janela de 24 horas da Meta**. Todas as mensagens seriam recusadas. A função não pode funcionar como está.
+- **O cupom `VOLTEI10` e o texto da mensagem estão escritos no código.** Nada é configurável pelo lojista.
+
+`src/services/ifood/ifood-api.ts` também importa o cliente anon. Fora de uso hoje, mas mesmo defeito latente.
+
+## Problema original: a IA inventa o que não sabe
 
 O restaurante real já está sendo atendido em produção. Na primeira conversa de validação, a IA afirmou **"Nós entregamos até as 22h!"** — um horário que não existe em lugar nenhum do sistema. Verificado por busca em `src/services/ai/` e no `schema.sql`: não há lógica nem coluna de horário de funcionamento.
 
@@ -17,11 +34,27 @@ A investigação encontrou três buracos distintos, e só um é "falta campo no 
 
 Junto disso, um segundo problema de honestidade: **mídia recebida some sem deixar rastro.** O webhook trata texto e áudio; imagem, documento, vídeo, figurinha e localização caem no ramo genérico e são gravados como `tipo: 'texto'` com texto nulo. Na prática, o cliente manda o comprovante de PIX e o lojista vê uma linha em branco — sem saber que existiu um arquivo.
 
+E um terceiro, do mesmo tipo do item 1 — **dado que existe e não chega à IA:** as tabelas `complementos` e `produto_complementos` existem no banco, mas `montarTextoDoCardapio` não as inclui. A IA não sabe que complementos existem e nunca os oferece, o que reduz o valor de cada pedido. Levantado ao comparar com um concorrente cuja IA pergunta sobre complementos.
+
+**Localização em tempo real** merece destaque próprio entre os tipos não tratados. É o jeito mais comum de um cliente de delivery informar onde está, e evita o erro de endereço digitado. Hoje o cliente manda a localização e a IA responde como se ele não tivesse dito nada.
+
 ## Princípio que guia o ciclo
 
-**A IA só afirma o que ela pode verificar; e a caixa de entrada mostra tudo que aconteceu de verdade.**
+**A IA só afirma o que ela pode verificar; a caixa de entrada mostra tudo que aconteceu de verdade; e o que o contrato promete precisa existir de fato.**
 
 ## Decisões tomadas
+
+### 0. Consertar o CRM antes de tudo
+
+Prioridade acima do horário de funcionamento. A IA inventar horário é ruim; a base de contatos não existir compromete três entregas contratadas de uma vez.
+
+O conserto tem três partes:
+
+- **Trocar `supabase` por `supabaseAdmin`** em `reactivation.ts`, e **verificar o `error` em todas as consultas** — o arquivo inteiro precisa passar pela regra que o resto do projeto já segue. O mesmo vale para `ifood-api.ts`, mesmo estando fora de uso.
+- **`runReactivationCampaign` passa a usar template aprovado**, não texto livre. É a única forma de alcançar cliente ausente há 15 ou 30 dias, que está sempre fora da janela de 24 horas. O template `reativacao_cupom` já está submetido à Meta.
+- **Cupom e texto saem do código.** Viram configuração do lojista, com as variáveis do template.
+
+**Teste que prova o conserto:** uma mensagem recebida cria a linha em `clientes_crm`. Esse teste teria pegado o defeito no dia zero.
 
 ### 1. Comportamento quando a IA não sabe
 
@@ -65,7 +98,19 @@ Descartado deixar a IA confirmar pagamento: print se falsifica em trinta segundo
 
 Descartado também ignorar a mídia: a IA responderia como se o cliente não tivesse dito nada.
 
-### 6. Custo de imagem: 3 créditos
+### 6. Localização vira tipo de primeira classe
+
+O cliente manda a localização do WhatsApp e ela chega à IA como coordenadas, utilizáveis para o endereço de entrega. Na caixa de entrada aparece de forma reconhecível, com link para o mapa.
+
+É o jeito mais comum de informar endereço em delivery, e elimina o erro de digitação — que hoje é onde mais se perde entrega.
+
+### 7. Complementos entram no texto do cardápio
+
+`montarTextoDoCardapio` passa a incluir os complementos de cada produto, com preço, no mesmo formato que já usa para os itens. As tabelas já existem; falta só chegarem ao prompt.
+
+Mesma regra vale: a IA só oferece complemento cadastrado, com o preço cadastrado.
+
+### 8. Custo de imagem: 3 créditos
 
 Texto custa 1, áudio custa 8. Visão custa mais que texto e menos que transcrição de áudio — 3 mantém a escala coerente e é defensável comercialmente.
 
@@ -94,7 +139,9 @@ JSONB em vez de sete pares de colunas porque a estrutura é irregular por nature
 
 **Prompt em `openai-agent.ts`** ganha: estado de abertura e próximo horário, taxa de entrega, pedido mínimo, informações adicionais, a regra anti-invenção alargada, a regra de nunca confirmar pagamento, e a regra de não anotar pedido enquanto fechado.
 
-**Webhook** passa a tratar imagem e documento como tipos de primeira classe: baixa da Meta, guarda no bucket privado (que já funciona), grava com o tipo correto. Vídeo, figurinha e localização continuam não suportados, mas ganham rótulo honesto em vez de linha vazia.
+**Webhook** passa a tratar imagem, documento e localização como tipos de primeira classe. Imagem e documento são baixados da Meta e guardados no bucket privado (que já funciona), gravados com o tipo correto. Localização não tem arquivo: guarda as coordenadas e o endereço, quando a Meta o envia. Vídeo e figurinha continuam não suportados, mas ganham rótulo honesto em vez de linha vazia.
+
+**CRM (`reactivation.ts`)** troca o cliente anon pelo `supabaseAdmin`, verifica o `error` em toda consulta, e a campanha de reativação passa a enviar template. `ifood-api.ts` recebe a mesma correção de cliente e de tratamento de erro.
 
 ### Frontend
 
@@ -107,11 +154,15 @@ Duas seções novas em **Configurações**, abaixo da conexão do WhatsApp:
 
 ## Testes
 
+- **CRM:** uma mensagem recebida cria a linha em `clientes_crm` — o teste que teria pegado o defeito no dia zero. Erro do Supabase propaga em vez de ser engolido.
 - **Função de horário:** aberto dentro da faixa, fechado fora, dia sem faixas, intervalo de almoço, virada de meia-noite, fuso correto, próximo horário de abertura calculado certo.
 - **Decisão de resposta quando fechado:** não anota pedido, informa o horário.
-- **Mídia:** imagem e documento gravados com tipo correto e URL; tipo não suportado gera rótulo honesto em vez de linha vazia; Meta mockada, sem rede.
+- **Mídia:** imagem, documento e localização gravados com tipo correto; tipo não suportado gera rótulo honesto em vez de linha vazia; Meta mockada, sem rede.
+- **Cardápio:** complementos aparecem no texto com preço; complemento indisponível é omitido, como já acontece com produto.
 - **Custo:** imagem debita 3 créditos.
 
 ## Fora de escopo
 
-Pedido agendado, IA confirmando pagamento, envio de mídia pelo painel, resposta em áudio, e suporte a vídeo/figurinha/localização. Cada um tem seu próprio ciclo.
+Pedido agendado, IA confirmando pagamento, envio de mídia pelo painel, resposta em áudio, suporte a vídeo e figurinha, taxa de entrega por bairro, e cupons como sistema próprio. Cada um tem seu próprio ciclo.
+
+**Nada aqui é descartado por "não estar no contrato".** O contrato define o mínimo, não o teto — estes itens estão fora deste ciclo por custo e sequência, e vivem no backlog priorizado do `progress.md`.
